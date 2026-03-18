@@ -1,5 +1,6 @@
 package com.sbfs.ai
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.net.URI
@@ -34,12 +35,24 @@ data class OpenRouterRequest(
     val stop: List<String>? = null,      // stop sequences
     val stream: Boolean = false,
 
-    // ── com.sbfs.ai.Response Format ──
+    // ── Response Format ──
     val responseFormat: String? = null,  // "json_object" or null
-
-    // ── Prompt ──
-    val prompt: String
+    val messagesQueue: List<MessageData>
 )
+
+@Serializable
+data class MessageData(
+    val role: MessageRole,
+    val content: String,
+)
+enum class MessageRole {
+    @SerialName("system")
+    SYSTEM,
+    @SerialName("user")
+    USER,
+    @SerialName("assistant")
+    ASSISTANT
+}
 
 fun buildRequestBody(req: OpenRouterRequest): String {
     val sb = StringBuilder()
@@ -58,9 +71,17 @@ fun buildRequestBody(req: OpenRouterRequest): String {
     req.seed?.let        { sb.append(""","seed":$it""") }
     req.stop?.let        { sb.append(""","stop":[${it.joinToString(",") { s -> "\"$s\""}}]""") }
     req.responseFormat?.let { sb.append(""","response_format":{"type":"$it"}""") }
-
-    val escaped = req.prompt.replace("\"", "\\\"").replace("\n", "\\n")
-    sb.append(""","messages":[{"role":"user","content":"$escaped"}]}""")
+    req.messagesQueue.let { messagesQueue ->
+        sb.append(""","messages":[""")
+        messagesQueue.forEachIndexed { index, message ->
+            sb.append(appJson.encodeToString(message))
+            if (index != messagesQueue.lastIndex) {
+                sb.append(",")
+            }
+        }
+        sb.append("]")
+    }
+    sb.append("}")
 
     return sb.toString()
 }
@@ -106,7 +127,7 @@ fun sendRequest(req: OpenRouterRequest): String {
 
 fun printUsage() {
     println("""
-        Usage: kotlin OpenRouterCLI.kt [options] "your prompt"
+        Usage: java -jar AiChallenge.jar <system prompt>
 
         Options:
           --model              <string>     Model to use (default: anthropic/claude-sonnet-4-5)
@@ -137,7 +158,7 @@ fun printUsage() {
 //java -jar AiChallenge.jar --max-tokens 128 --stop /object "What green objects do you know? Describe it with the xml object"
 
 fun main(args: Array<String>) {
-    if (args.isEmpty() || args.contains("--help")) { printUsage(); return }
+    if (args.contains("--help")) { printUsage(); return }
 
     var model              = "anthropic/claude-sonnet-4-5"
     var temperature        = 1.0
@@ -152,9 +173,10 @@ fun main(args: Array<String>) {
     var seed: Int?         = null
     var jsonMode           = false
     val stopSequences      = mutableListOf<String>()
-    var prompt             = ""
+    var systemPrompt: String? = null
 
     var i = 0
+    var likeAChat = false
     while (i < args.size) {
         when (args[i]) {
             "--model"              -> { model             = args[++i] }
@@ -170,14 +192,13 @@ fun main(args: Array<String>) {
             "--seed"               -> { seed              = args[++i].toInt() }
             "--stop"               -> { stopSequences.add(args[++i]) }
             "--json"               -> { jsonMode          = true }
-            else                   -> { prompt            = args[i] }
+            "--likeAChat"          -> { likeAChat          = true }
+            else                   -> { systemPrompt            = args[i] }
         }
         i++
     }
 
-    if (prompt.isBlank()) { println("❌ No prompt provided.\n"); printUsage(); return }
-
-    val request = OpenRouterRequest(
+    var request = OpenRouterRequest(
         model             = model,
         temperature       = temperature,
         topP              = topP,
@@ -191,10 +212,12 @@ fun main(args: Array<String>) {
         seed              = seed,
         stop              = stopSequences.ifEmpty { null },
         responseFormat    = if (jsonMode) "json_object" else null,
-        prompt            = prompt
+        messagesQueue = listOfNotNull(
+            systemPrompt?.messageDataByRole(MessageRole.SYSTEM)
+        ),
     )
 
-    println("🚀 Sending to OpenRouter...")
+    println("🚀 Start connection with OpenRouter...")
     println("   Model              : $model")
     println("   Temperature        : $temperature")
     println("   Top-P              : $topP")
@@ -204,15 +227,37 @@ fun main(args: Array<String>) {
     println("   Frequency Penalty  : $frequencyPenalty")
     println("   Presence Penalty   : $presencePenalty")
     println("   Repetition Penalty : $repetitionPenalty")
+    println("   Like a chat        : $likeAChat")
     maxTokens?.let { println("   Max Tokens         : $it") }
     seed?.let      { println("   Seed               : $it") }
-    if (jsonMode)  println("   com.sbfs.ai.Response Format    : json_object")
+    if (jsonMode)  println("   Response Format    : json_object")
+    systemPrompt?.let      { println("   System Prompt      : $it") }
     println("-".repeat(50))
 
     try {
-        println("\ncom.sbfs.ai.Response:\n")
-        println(sendRequest(request))
+        do {
+            println("\nWrite your request:")
+            val prompt = readln()
+            request = request.copy(
+                messagesQueue = request.messagesQueue + prompt.messageDataByRole(MessageRole.USER)
+            )
+            val response = sendRequest(request)
+            println("-".repeat(50))
+            println("\nResponse:\n")
+            println(response)
+            println("-".repeat(50))
+            request = request.copy(
+                messagesQueue = request.messagesQueue + response.messageDataByRole(MessageRole.ASSISTANT)
+            )
+        } while (likeAChat)
     } catch (e: Exception) {
         println("❌ Error: ${e.message}")
     }
+}
+
+private fun String.messageDataByRole(role: MessageRole): MessageData {
+    return MessageData(
+        role = role,
+        content = this.replace("\"", "\\\"").replace("\n", "\\n")
+    )
 }
