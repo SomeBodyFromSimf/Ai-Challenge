@@ -37,7 +37,6 @@ data class OpenRouterRequest(
 
     // ── Response Format ──
     val responseFormat: String? = null,  // "json_object" or null
-
     val messagesQueue: List<MessageData>
 )
 
@@ -47,6 +46,8 @@ data class MessageData(
     val content: String,
 )
 enum class MessageRole {
+    @SerialName("system")
+    SYSTEM,
     @SerialName("user")
     USER,
     @SerialName("assistant")
@@ -126,7 +127,7 @@ fun sendRequest(req: OpenRouterRequest): String {
 
 fun printUsage() {
     println("""
-        Usage: java -jar AiChallenge.jar
+        Usage: java -jar AiChallenge.jar <system prompt>
 
         Options:
           --model              <string>     Model to use (default: anthropic/claude-sonnet-4-5)
@@ -172,8 +173,10 @@ fun main(args: Array<String>) {
     var seed: Int?         = null
     var jsonMode           = false
     val stopSequences      = mutableListOf<String>()
+    var systemPrompt: String? = null
 
     var i = 0
+    var likeAChat = false
     while (i < args.size) {
         when (args[i]) {
             "--model"              -> { model             = args[++i] }
@@ -189,7 +192,8 @@ fun main(args: Array<String>) {
             "--seed"               -> { seed              = args[++i].toInt() }
             "--stop"               -> { stopSequences.add(args[++i]) }
             "--json"               -> { jsonMode          = true }
-            else                   -> { }
+            "--likeAChat"          -> { likeAChat          = true }
+            else                   -> { systemPrompt            = args[i] }
         }
         i++
     }
@@ -208,7 +212,9 @@ fun main(args: Array<String>) {
         seed              = seed,
         stop              = stopSequences.ifEmpty { null },
         responseFormat    = if (jsonMode) "json_object" else null,
-        messagesQueue = listOf(),
+        messagesQueue = listOfNotNull(
+            systemPrompt?.messageDataByRole(MessageRole.SYSTEM)
+        ),
     )
 
     println("🚀 Start connection with OpenRouter...")
@@ -221,27 +227,29 @@ fun main(args: Array<String>) {
     println("   Frequency Penalty  : $frequencyPenalty")
     println("   Presence Penalty   : $presencePenalty")
     println("   Repetition Penalty : $repetitionPenalty")
+    println("   Like a chat        : $likeAChat")
     maxTokens?.let { println("   Max Tokens         : $it") }
     seed?.let      { println("   Seed               : $it") }
     if (jsonMode)  println("   Response Format    : json_object")
+    systemPrompt?.let      { println("   System Prompt      : $it") }
     println("-".repeat(50))
 
-
-
     try {
-        while (true) {
+        do {
             println("\nWrite your request:")
             val prompt = readln()
             request = request.copy(
                 messagesQueue = request.messagesQueue + prompt.messageDataByRole(MessageRole.USER)
             )
             val response = sendRequest(request)
+            println("-".repeat(50))
             println("\nResponse:\n")
             println(response)
+            println("-".repeat(50))
             request = request.copy(
                 messagesQueue = request.messagesQueue + response.messageDataByRole(MessageRole.ASSISTANT)
             )
-        }
+        } while (likeAChat)
     } catch (e: Exception) {
         println("❌ Error: ${e.message}")
     }
