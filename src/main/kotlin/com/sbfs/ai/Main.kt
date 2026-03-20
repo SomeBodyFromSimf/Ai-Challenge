@@ -89,7 +89,21 @@ fun buildRequestBody(req: OpenRouterRequest): String {
 @Serializable
 class Response(
     val choices: List<ResponseChoice>,
+    val usage: ResponseUsage
 )
+
+@Serializable
+data class ResponseUsage(
+    @SerialName("prompt_tokens")
+    val promptTokens: Int,
+    @SerialName("completion_tokens")
+    val completionTokens: Int,
+    @SerialName("total_tokens")
+    val totalTokens: Int,
+    val cost: Double,
+
+)
+
 
 @Serializable
 class ResponseChoice(
@@ -106,11 +120,11 @@ private val appJson = Json {
     ignoreUnknownKeys = true
 }
 
-fun parseResponse(json: String): String {
-    return appJson.decodeFromString<Response>(json).choices.firstOrNull()?.message?.content ?: "Empty response"
+fun parseResponse(json: String): Response {
+    return appJson.decodeFromString<Response>(json)
 }
 
-fun sendRequest(req: OpenRouterRequest): String {
+fun sendRequest(req: OpenRouterRequest): Response {
     val client = HttpClient.newHttpClient()
     val httpRequest = HttpRequest.newBuilder()
         .uri(URI.create(OPENROUTER_URL))
@@ -241,13 +255,19 @@ fun main(args: Array<String>) {
             request = request.copy(
                 messagesQueue = request.messagesQueue + prompt.messageDataByRole(MessageRole.USER)
             )
+            val timeBefore = System.currentTimeMillis()
             val response = sendRequest(request)
+            val responseMessage = response.choices.firstOrNull()?.message?.content ?: "Empty response"
+            val timeAfter = System.currentTimeMillis()
+            println("-".repeat(50))
+            println("\nRequestTime: ${timeAfter - timeBefore} ms")
+            println("\nResponseData: promptTokens=${response.usage.promptTokens}, completionTokens=${response.usage.completionTokens}, totalTokens=${response.usage.totalTokens}, cost=${"%.5f".format(response.usage.cost)}")
             println("-".repeat(50))
             println("\nResponse:\n")
-            println(response)
+            println(responseMessage)
             println("-".repeat(50))
             request = request.copy(
-                messagesQueue = request.messagesQueue + response.messageDataByRole(MessageRole.ASSISTANT)
+                messagesQueue = request.messagesQueue + responseMessage.messageDataByRole(MessageRole.ASSISTANT)
             )
         } while (likeAChat)
     } catch (e: Exception) {
