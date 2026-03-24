@@ -1,0 +1,25 @@
+CREATE TABLE IF NOT EXISTS session (
+    id TEXT NOT NULL PRIMARY KEY,
+    title TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    settings_data TEXT NOT NULL
+);
+
+getAll:
+SELECT * FROM session;
+
+getByKey:
+SELECT * FROM session WHERE id = :id;
+
+insert:
+INSERT OR REPLACE INTO session VALUES ?;
+
+updateSettings:
+UPDATE session SET id =:id, title = :title, updated_at = :update_time, settings_data = :data;
+
+deleteById:
+DELETE FROM session WHERE id = :id;
+
+deleteAll:
+DELETE FROM session;

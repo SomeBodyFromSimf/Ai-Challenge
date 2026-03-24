@@ -1,0 +1,19 @@
+CREATE TABLE IF NOT EXISTS message (
+    id TEXT NOT NULL PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    timestamp INTEGER NOT NULL
+);
+
+getAll:
+SELECT * FROM message;
+
+getByKey:
+SELECT * FROM message WHERE id = :id;
+
+insert:
+INSERT OR REPLACE INTO message VALUES ?;
+
+deleteByKey:
+DELETE FROM message WHERE id = :id;
