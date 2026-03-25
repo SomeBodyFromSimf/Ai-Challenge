@@ -3,7 +3,8 @@ CREATE TABLE IF NOT EXISTS session (
     title TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
-    settings_data TEXT NOT NULL
+    settings_data TEXT NOT NULL,
+    totalToken INTEGER
 );
 
 getAll:
@@ -16,7 +17,10 @@ insert:
 INSERT OR REPLACE INTO session VALUES ?;
 
 updateSettings:
-UPDATE session SET id =:id, title = :title, updated_at = :update_time, settings_data = :data;
+UPDATE session SET title = :title, updated_at = :update_time, settings_data = :data, totalToken = :totalToken WHERE id =:id;
+
+deleteTokenInfo:
+UPDATE session SET id =:id, totalToken = NULL WHERE id =:id;
 
 deleteById:
 DELETE FROM session WHERE id = :id;

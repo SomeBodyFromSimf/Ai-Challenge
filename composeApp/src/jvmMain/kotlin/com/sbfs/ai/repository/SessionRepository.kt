@@ -30,7 +30,8 @@ class SessionRepository(
                         title = sessionEntity.title,
                         createdAt = Instant.fromEpochMilliseconds(sessionEntity.created_at),
                         updatedAt = Instant.fromEpochMilliseconds(sessionEntity.updated_at),
-                        settings = settings
+                        settings = settings,
+                        totalToken = sessionEntity.totalToken,
                     )
                 }
         }
@@ -45,7 +46,8 @@ class SessionRepository(
                 title = entity.title,
                 createdAt = Instant.fromEpochMilliseconds(entity.created_at),
                 updatedAt = Instant.fromEpochMilliseconds(entity.updated_at),
-                settings = settings
+                settings = settings,
+                totalToken = sessionEntity.totalToken,
             )
         }
     }
@@ -61,6 +63,7 @@ class SessionRepository(
                 created_at = now.toEpochMilliseconds(),
                 updated_at = now.toEpochMilliseconds(),
                 settings_data = Json.encodeToString(settings),
+                totalToken = null
             )
         )
         
@@ -69,7 +72,8 @@ class SessionRepository(
             title = title,
             createdAt = now,
             updatedAt = now,
-            settings = settings
+            settings = settings,
+            totalToken = null
         )
     }
     
@@ -79,11 +83,18 @@ class SessionRepository(
             title = session.title,
             update_time = session.updatedAt.toEpochMilliseconds(),
             data = Json.encodeToString(session.settings),
+            totalToken = session.totalToken,
         )
     }
     
     fun deleteSession(id: String) {
         sessionQueries.deleteById(id)
         messageQueries.deleteByKey(id)
+    }
+
+    fun clearTokenInfo(id: String) {
+        sessionQueries.deleteTokenInfo(
+            id = id,
+        )
     }
 }

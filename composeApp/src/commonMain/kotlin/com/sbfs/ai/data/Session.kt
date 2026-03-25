@@ -9,12 +9,13 @@ data class Session(
     val title: String,
     val createdAt: Instant,
     val updatedAt: Instant,
-    val settings: SessionSettings
+    val settings: SessionSettings,
+    val totalToken: Long?,
 )
 
 @Serializable
 data class SessionSettings(
-    val model: String = "anthropic/claude-sonnet-4-5",
+    val model: Model? = null,
     val temperature: Double = 1.0,
     val topP: Double = 1.0,
     val topK: Int = 0,

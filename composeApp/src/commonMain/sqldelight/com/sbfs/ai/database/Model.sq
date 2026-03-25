@@ -1,0 +1,17 @@
+CREATE TABLE IF NOT EXISTS model (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    contextLength INTEGER NOT NULL
+);
+
+getAll:
+SELECT * FROM model ORDER BY name ASC;
+
+getByName:
+SELECT * FROM model WHERE name = :name;
+
+insert:
+INSERT OR REPLACE INTO model VALUES ?;
+
+deleteAll:
+DELETE FROM model;

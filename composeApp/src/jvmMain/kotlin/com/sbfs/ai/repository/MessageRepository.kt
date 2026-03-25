@@ -1,8 +1,13 @@
 package com.sbfs.ai.repository
 
+import app.cash.sqldelight.coroutines.asFlow
+import app.cash.sqldelight.coroutines.mapToList
 import com.sbfs.ai.data.Message
 import com.sbfs.ai.data.MessageRole
 import com.sbfs.ai.db.AiChallengeDb
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlin.time.Instant
 
 class MessageRepository(
@@ -10,15 +15,22 @@ class MessageRepository(
 ) {
     private val messageQueries = db.messageQueries
     
-    fun getMessagesBySessionId(sessionId: String): List<Message> {
-        return messageQueries.getByKey(sessionId).executeAsList().map { messageEntity ->
-            Message(
-                id = messageEntity.id,
-                sessionId = messageEntity.session_id,
-                role = MessageRole.valueOf(messageEntity.role),
-                content = messageEntity.content,
-                timestamp = Instant.fromEpochMilliseconds(messageEntity.timestamp)
-            )
+    fun getMessagesFlowBySessionId(sessionId: String): Flow<List<Message>> {
+        return messageQueries.getByKey(sessionId)
+            .asFlow()
+            .mapToList(Dispatchers.IO)
+            .map { list ->
+                list.map { messageEntity ->
+                    Message(
+                        id = messageEntity.id,
+                        sessionId = messageEntity.session_id,
+                        role = MessageRole.valueOf(messageEntity.role),
+                        content = messageEntity.content,
+                        timestamp = Instant.fromEpochMilliseconds(messageEntity.timestamp),
+                        usedToken = messageEntity.usedToken,
+                        cost = messageEntity.cost,
+                    )
+                }
         }
     }
     
@@ -29,8 +41,17 @@ class MessageRepository(
                 session_id = message.sessionId,
                 role = message.role.name,
                 content = message.content,
-                timestamp = message.timestamp.toEpochMilliseconds()
+                timestamp = message.timestamp.toEpochMilliseconds(),
+                usedToken = message.usedToken,
+                cost = message.cost,
             )
+        )
+    }
+
+    fun updateMessage(message: Message, usedToken: Long) {
+        messageQueries.update(
+            id = message.id,
+            usedToken = usedToken,
         )
     }
     

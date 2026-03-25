@@ -30,15 +30,11 @@ fun MainWindow() {
     val sessions by viewModel.sessions.collectAsState()
     val currentSession by viewModel.currentSession.collectAsState()
     val settings by viewModel.settings.collectAsState()
-    val messages by viewModel.messages.collectAsState()
-    val loadingSet by viewModel.isLoading.collectAsState()
+    val messagesPair by viewModel.messages.collectAsState()
     val error by viewModel.error.collectAsState()
+    val models by viewModel.models.collectAsState()
 
-    val isLoading by remember {
-        derivedStateOf {
-            loadingSet.contains(currentSession?.id)
-        }
-    }
+    val (messages, isLoading) = messagesPair
 
     Scaffold(
         topBar = {
@@ -60,6 +56,7 @@ fun MainWindow() {
                 // Левая панель - настройки параметров запроса
                 SettingsPanel(
                     settings = settings,
+                    availableModels = models,
                     onSettingsChange = { newSettings -> viewModel.updateSettings(newSettings) },
                     modifier = Modifier
                         .weight(0.7f)

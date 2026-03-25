@@ -5,12 +5,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.sbfs.ai.data.Model
 import com.sbfs.ai.data.SessionSettings
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsPanel(
     settings: SessionSettings,
+    availableModels: List<Model>,
     onSettingsChange: (SessionSettings) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -27,14 +29,39 @@ fun SettingsPanel(
             
             Spacer(modifier = Modifier.height(16.dp))
             
-            OutlinedTextField(
-                value = settings.model,
-                onValueChange = { value ->
-                    onSettingsChange(settings.copy(model = value))
-                },
-                label = { Text("Модель") },
-                modifier = Modifier.fillMaxWidth()
-            )
+            var expanded by remember { mutableStateOf(false) }
+            ExposedDropdownMenuBox(
+                expanded = expanded,
+                onExpandedChange = { expanded = !expanded }
+            ) {
+                TextField(
+                    readOnly = true,
+                    value = "${settings.model.name} (${settings.model.contextLength})",
+                    onValueChange = { },
+                    label = { Text("Модель") },
+                    trailingIcon = {
+                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+                    },
+                    colors = ExposedDropdownMenuDefaults.textFieldColors(),
+                    modifier = Modifier
+                        .menuAnchor()
+                        .fillMaxWidth()
+                )
+                ExposedDropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false }
+                ) {
+                    availableModels.forEach { model ->
+                        DropdownMenuItem(
+                            text = { Text("${model.name} (${model.contextLength})") },
+                            onClick = {
+                                onSettingsChange(settings.copy(model = model))
+                                expanded = false
+                            }
+                        )
+                    }
+                }
+            }
             
             Spacer(modifier = Modifier.height(8.dp))
             

@@ -10,7 +10,9 @@ data class Message(
     val sessionId: String,
     val role: MessageRole,
     val content: String,
-    val timestamp: Instant
+    val timestamp: Instant,
+    val usedToken: Long?,
+    val cost: String?
 )
 
 @Serializable

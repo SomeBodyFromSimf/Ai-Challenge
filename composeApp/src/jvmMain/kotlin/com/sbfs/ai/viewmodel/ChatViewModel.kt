@@ -3,14 +3,13 @@ package com.sbfs.ai.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sbfs.ai.OpenRouterClient
-import com.sbfs.ai.data.Message
-import com.sbfs.ai.data.MessageRole
-import com.sbfs.ai.data.Session
-import com.sbfs.ai.data.SessionSettings
+import com.sbfs.ai.data.*
 import com.sbfs.ai.db.AiChallengeDb
 import com.sbfs.ai.db.DatabaseDriverFactory
 import com.sbfs.ai.repository.MessageRepository
+import com.sbfs.ai.repository.ModelRepository
 import com.sbfs.ai.repository.SessionRepository
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.*
@@ -21,22 +20,47 @@ class ChatViewModel : ViewModel() {
 
     private val sessionRepository = SessionRepository(db)
     private val messageRepository = MessageRepository(db)
+    private val modelRepository = ModelRepository(db)
     private val openRouterClient = OpenRouterClient()
     
     val sessions = sessionRepository.getAllSessions()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), emptyList())
     
-    private val _currentSession = MutableStateFlow<Session?>(null)
-    val currentSession: StateFlow<Session?> = _currentSession.asStateFlow()
-    
-    private val _messages = MutableStateFlow<List<Message>>(emptyList())
-    val messages: StateFlow<List<Message>> = _messages.asStateFlow()
+    private val currentSessionId = MutableStateFlow<String?>(null)
+    val currentSession: StateFlow<Session?> = combine(
+        sessions,
+        currentSessionId
+    ) { s, id ->
+        s.find { it.id == id }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), null)
+    private val isLoading = MutableStateFlow<Set<String>>(hashSetOf())
+
+    val models = flow {
+        val offlineModels = modelRepository.getModels()
+        if (offlineModels.isNotEmpty()) {
+            emit(offlineModels)
+        } else {
+            emit(openRouterClient.getAvailableModels())
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), emptyList())
+
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val messages: StateFlow<Pair<List<Message>, Boolean>> = currentSession.flatMapLatest { session ->
+        if (session != null) {
+            combine(
+                messageRepository.getMessagesFlowBySessionId(session.id),
+                isLoading.map { it.contains(session.id) }
+            ) { messages, isLoading ->
+                messages to isLoading
+            }
+        } else {
+            flowOf(emptyList<Message>() to false)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), emptyList<Message>() to false)
     
     private val _settings = MutableStateFlow(SessionSettings())
     val settings: StateFlow<SessionSettings> = _settings.asStateFlow()
-    
-    private val _isLoading = MutableStateFlow<Set<String>>(hashSetOf())
-    val isLoading: StateFlow<Set<String>> = _isLoading.asStateFlow()
     
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
@@ -55,9 +79,8 @@ class ChatViewModel : ViewModel() {
     fun selectSession(session: Session) {
         viewModelScope.launch {
             try {
-                _currentSession.value = session
+                currentSessionId.value = session.id
                 _settings.value = session.settings
-                loadMessages(session.id)
             } catch (e: Exception) {
                 _error.value = "Ошибка выбора сессии: ${e.message}"
             }
@@ -68,8 +91,7 @@ class ChatViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 val newSession = sessionRepository.createSession(title, _settings.value)
-                _currentSession.value = newSession
-                _messages.value = emptyList()
+                currentSessionId.value = newSession.id
             } catch (e: Exception) {
                 _error.value = "Ошибка создания сессии: ${e.message}"
             }
@@ -78,12 +100,11 @@ class ChatViewModel : ViewModel() {
     
     fun updateSettings(newSettings: SessionSettings) {
         _settings.value = newSettings
-        _currentSession.value?.let { session ->
+        currentSession.value?.let { session ->
             viewModelScope.launch {
                 try {
                     val updatedSession = session.copy(settings = newSettings)
                     sessionRepository.updateSession(updatedSession)
-                    _currentSession.value = updatedSession
                 } catch (e: Exception) {
                     _error.value = "Ошибка обновления настроек: ${e.message}"
                 }
@@ -95,9 +116,8 @@ class ChatViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 sessionRepository.deleteSession(sessionId)
-                if (_currentSession.value?.id == sessionId) {
-                    _currentSession.value = null
-                    _messages.value = emptyList()
+                if (currentSessionId.value == sessionId) {
+                    currentSessionId.value = null
                 }
             } catch (e: Exception) {
                 _error.value = "Ошибка удаления сессии: ${e.message}"
@@ -108,9 +128,9 @@ class ChatViewModel : ViewModel() {
     fun clearCurrentSession() {
         viewModelScope.launch {
             try {
-                _currentSession.value?.let { session ->
-                    messageRepository.deleteMessagesBySessionId(session.id)
-                    _messages.value = emptyList()
+                currentSessionId.value?.let { sessionId ->
+                    messageRepository.deleteMessagesBySessionId(sessionId)
+                    sessionRepository.clearTokenInfo(sessionId)
                 }
             } catch (e: Exception) {
                 _error.value = "Ошибка очистки сессии: ${e.message}"
@@ -118,57 +138,52 @@ class ChatViewModel : ViewModel() {
         }
     }
     
-    private fun loadMessages(sessionId: String) {
-        viewModelScope.launch {
-            try {
-                _messages.value = messageRepository.getMessagesBySessionId(sessionId)
-            } catch (e: Exception) {
-                _error.value = "Ошибка загрузки сообщений: ${e.message}"
-            }
-        }
-    }
-    
     fun sendMessage(content: String) {
         viewModelScope.launch {
-            val sessionId = _currentSession.value?.id ?: run {
+            val session = currentSession.value ?: run {
                 _error.value = "Сперва создайте сессию"
                 return@launch
             }
             try {
-                _isLoading.value += sessionId
+                isLoading.value += session.id
                 _error.value = null
                 
                 // Создаем и сохраняем сообщение пользователя
                 val userMessage = Message(
                     id = UUID.randomUUID().toString(),
-                    sessionId = sessionId,
+                    sessionId = session.id,
                     role = MessageRole.USER,
                     content = content,
-                    timestamp = Clock.System.now()
+                    timestamp = Clock.System.now(),
+                    usedToken = null,
+                    cost = null
                 )
-                
+                val currentMessages = messages.value.first + userMessage
+
                 messageRepository.addMessage(userMessage)
-                val updatedMessages = _messages.value + userMessage
-                _messages.value = updatedMessages
-                
+
                 // Получаем ответ от LLM
-                val responseContent = openRouterClient.sendMessage(updatedMessages, _settings.value)
-                
+                val responseContent = openRouterClient.sendMessage(currentMessages + userMessage, _settings.value)
+                val cost = "%.10f".format(responseContent.cost).dropLastWhile { it == '0' }
+                val updatedSession = session.copy(totalToken = responseContent.totalUsedToken)
+                sessionRepository.updateSession(updatedSession)
+
                 // Создаем и сохраняем сообщение ассистента
                 val assistantMessage = Message(
                     id = UUID.randomUUID().toString(),
-                    sessionId = _currentSession.value?.id ?: return@launch,
+                    sessionId = session.id,
                     role = MessageRole.ASSISTANT,
-                    content = responseContent,
-                    timestamp = Clock.System.now()
+                    content = responseContent.content,
+                    timestamp = Clock.System.now(),
+                    usedToken = responseContent.outputUsedToken,
+                    cost
                 )
                 
                 messageRepository.addMessage(assistantMessage)
-                _messages.value = updatedMessages + assistantMessage
             } catch (e: Exception) {
                 _error.value = "Ошибка отправки сообщения: ${e.message}"
             } finally {
-                _isLoading.value -= sessionId
+                isLoading.value -= session.id
             }
         }
     }

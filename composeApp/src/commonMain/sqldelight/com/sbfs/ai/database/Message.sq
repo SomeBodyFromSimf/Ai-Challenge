@@ -3,7 +3,9 @@ CREATE TABLE IF NOT EXISTS message (
     session_id TEXT NOT NULL,
     role TEXT NOT NULL,
     content TEXT NOT NULL,
-    timestamp INTEGER NOT NULL
+    timestamp INTEGER NOT NULL,
+    usedToken INTEGER,
+    cost TEXT
 );
 
 getAll:
@@ -14,6 +16,9 @@ SELECT * FROM message WHERE session_id = :id;
 
 insert:
 INSERT OR REPLACE INTO message VALUES ?;
+
+update:
+UPDATE message SET usedToken = :usedToken WHERE id = :id;
 
 deleteByKey:
 DELETE FROM message WHERE session_id = :id;
