@@ -1,0 +1,15 @@
+import kotlin.Boolean;
+
+CREATE TABLE IF NOT EXISTS params (
+    session_id TEXT NOT NULL PRIMARY KEY,
+    is_summary_enabled INTEGER AS Boolean NOT NULL
+);
+
+get:
+SELECT * FROM params WHERE session_id = :session_id;
+
+update:
+INSERT OR REPLACE INTO params VALUES ?;
+
+deleteByKey:
+DELETE FROM params WHERE session_id = :session_id;

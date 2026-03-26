@@ -20,5 +20,8 @@ INSERT OR REPLACE INTO message VALUES ?;
 update:
 UPDATE message SET usedToken = :usedToken WHERE id = :id;
 
-deleteByKey:
+deleteBySessionId:
 DELETE FROM message WHERE session_id = :id;
+
+deleteById:
+DELETE FROM message WHERE id = :id;

@@ -4,6 +4,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -28,7 +29,14 @@ fun ChatPanel(
     modifier: Modifier = Modifier
 ) {
     var messageText by remember { mutableStateOf("") }
-    
+
+
+    val lazyListState = rememberLazyListState()
+
+    LaunchedEffect(messages) {
+        lazyListState.scrollToItem(messages.lastIndex)
+    }
+
     Card(modifier = modifier) {
         Column(
             modifier = Modifier
@@ -49,7 +57,8 @@ fun ChatPanel(
             // Отображение сообщений
             LazyColumn(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                state = lazyListState,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(messages) { message ->
                     MessageItem(message = message)

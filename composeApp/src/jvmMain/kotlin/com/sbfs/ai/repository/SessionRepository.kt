@@ -16,7 +16,6 @@ class SessionRepository(
     db: AiChallengeDb,
 ) {
     private val sessionQueries = db.sessionQueries
-    private val messageQueries = db.messageQueries
 
     fun getAllSessions(): Flow<List<Session>> {
         return sessionQueries.getAll()
@@ -89,7 +88,6 @@ class SessionRepository(
     
     fun deleteSession(id: String) {
         sessionQueries.deleteById(id)
-        messageQueries.deleteByKey(id)
     }
 
     fun clearTokenInfo(id: String) {

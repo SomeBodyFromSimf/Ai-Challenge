@@ -2,6 +2,7 @@ package com.sbfs.ai.ui
 
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.Divider
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -33,6 +34,7 @@ fun MainWindow() {
     val messagesPair by viewModel.messages.collectAsState()
     val error by viewModel.error.collectAsState()
     val models by viewModel.models.collectAsState()
+    val sessionParams by viewModel.sessionParams.collectAsState()
 
     val (messages, isLoading) = messagesPair
 
@@ -76,19 +78,31 @@ fun MainWindow() {
                         .fillMaxHeight()
                 )
 
-                // Правая панель - управление контекстом и памятью
-                ContextPanel(
-                    sessions = sessions,
-                    currentSession = currentSession,
-                    onSessionSelected = { session -> viewModel.selectSession(session) },
-                    onCreateNewSession = { title -> viewModel.createNewSession(title) },
-                    onDeleteSession = { sessionId -> viewModel.deleteSession(sessionId) },
-                    onClearSession = { viewModel.clearCurrentSession() },
+                Column(
                     modifier = Modifier
                         .weight(0.7f)
                         .fillMaxHeight()
-                        .border(2.dp, MaterialTheme.colorScheme.inverseOnSurface)
-                )
+                        .border(2.dp, MaterialTheme.colorScheme.inverseOnSurface),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    ContextPanel(
+                        modifier = Modifier.weight(1f),
+                        sessions = sessions,
+                        currentSession = currentSession,
+                        onSessionSelected = { session -> viewModel.selectSession(session) },
+                        onCreateNewSession = { title -> viewModel.createNewSession(title) },
+                        onDeleteSession = { sessionId -> viewModel.deleteSession(sessionId) },
+                        onClearSession = { viewModel.clearCurrentSession() },
+                    )
+                    ParamsPanel(
+                        modifier = Modifier.weight(1f),
+                        params = sessionParams,
+                        onParamChange = { params -> viewModel.onParamsChanged(params) }
+                    )
+                }
+
+                // Правая панель - управление контекстом и памятью
+
             }
 
             // Отображение ошибок

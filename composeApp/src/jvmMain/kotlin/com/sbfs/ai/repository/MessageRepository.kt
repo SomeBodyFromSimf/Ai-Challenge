@@ -1,5 +1,6 @@
 package com.sbfs.ai.repository
 
+import androidx.compose.ui.layout.SubcomposeSlotReusePolicy
 import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
 import com.sbfs.ai.data.Message
@@ -56,6 +57,14 @@ class MessageRepository(
     }
     
     fun deleteMessagesBySessionId(sessionId: String) {
-        messageQueries.deleteByKey(sessionId)
+        messageQueries.deleteBySessionId(sessionId)
+    }
+
+    fun removeMessages(listIds: List<String>) {
+        messageQueries.transaction {
+            listIds.forEach {
+                messageQueries.deleteById(it)
+            }
+        }
     }
 }

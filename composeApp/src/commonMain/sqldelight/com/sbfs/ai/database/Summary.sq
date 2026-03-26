@@ -1,0 +1,15 @@
+CREATE TABLE IF NOT EXISTS summary (
+    session_id TEXT NOT NULL PRIMARY KEY,
+    content TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    tokens INTEGER NOT NULL
+);
+
+getByKey:
+SELECT * FROM summary WHERE session_id = :session_id;
+
+insert:
+INSERT OR REPLACE INTO summary VALUES ?;
+
+deleteByKey:
+DELETE FROM summary WHERE session_id = :session_id;

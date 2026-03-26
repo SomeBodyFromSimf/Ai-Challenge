@@ -8,19 +8,26 @@ import com.sbfs.ai.db.AiChallengeDb
 import com.sbfs.ai.db.DatabaseDriverFactory
 import com.sbfs.ai.repository.MessageRepository
 import com.sbfs.ai.repository.ModelRepository
+import com.sbfs.ai.repository.ParamsRepository
 import com.sbfs.ai.repository.SessionRepository
+import com.sbfs.ai.repository.SummaryRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.*
 import kotlin.time.Clock
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class ChatViewModel : ViewModel() {
     private val db = AiChallengeDb(DatabaseDriverFactory().createDriver())
 
     private val sessionRepository = SessionRepository(db)
     private val messageRepository = MessageRepository(db)
     private val modelRepository = ModelRepository(db)
+
+    private val paramsRepository = ParamsRepository(db)
+
+    private val summaryRepository = SummaryRepository(db)
     private val openRouterClient = OpenRouterClient()
     
     val sessions = sessionRepository.getAllSessions()
@@ -44,15 +51,23 @@ class ChatViewModel : ViewModel() {
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), emptyList())
 
+    val sessionParams = currentSessionId.flatMapLatest { sessionId ->
+        if (sessionId != null) {
+            paramsRepository.getSessionParams(sessionId)
+        } else {
+            flowOf(Params())
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), Params())
 
-    @OptIn(ExperimentalCoroutinesApi::class)
+
     val messages: StateFlow<Pair<List<Message>, Boolean>> = currentSession.flatMapLatest { session ->
         if (session != null) {
             combine(
+                summaryRepository.getSummaryForSession(session.id),
                 messageRepository.getMessagesFlowBySessionId(session.id),
                 isLoading.map { it.contains(session.id) }
-            ) { messages, isLoading ->
-                messages to isLoading
+            ) { summaryMessage, messages, isLoading ->
+                (listOfNotNull(summaryMessage) + messages) to isLoading
             }
         } else {
             flowOf(emptyList<Message>() to false)
@@ -116,6 +131,9 @@ class ChatViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 sessionRepository.deleteSession(sessionId)
+                messageRepository.deleteMessagesBySessionId(sessionId)
+                paramsRepository.deleteParams(sessionId)
+                summaryRepository.deleteSummary(sessionId)
                 if (currentSessionId.value == sessionId) {
                     currentSessionId.value = null
                 }
@@ -124,12 +142,21 @@ class ChatViewModel : ViewModel() {
             }
         }
     }
+
+
+    fun onParamsChanged(params: Params) {
+        viewModelScope.launch {
+            currentSessionId.value?.let { paramsRepository.updateParams(it, params) }
+        }
+    }
+
     
     fun clearCurrentSession() {
         viewModelScope.launch {
             try {
                 currentSessionId.value?.let { sessionId ->
                     messageRepository.deleteMessagesBySessionId(sessionId)
+                    summaryRepository.deleteSummary(sessionId)
                     sessionRepository.clearTokenInfo(sessionId)
                 }
             } catch (e: Exception) {
@@ -158,9 +185,11 @@ class ChatViewModel : ViewModel() {
                     usedToken = null,
                     cost = null
                 )
+
                 val currentMessages = messages.value.first + userMessage
 
                 messageRepository.addMessage(userMessage)
+
 
                 // Получаем ответ от LLM
                 val responseContent = openRouterClient.sendMessage(currentMessages + userMessage, _settings.value)
@@ -176,15 +205,62 @@ class ChatViewModel : ViewModel() {
                     content = responseContent.content,
                     timestamp = Clock.System.now(),
                     usedToken = responseContent.outputUsedToken,
-                    cost
+                    cost = cost,
                 )
                 
                 messageRepository.addMessage(assistantMessage)
+
+                if (sessionParams.value.isSummaryEnabled) {
+                    summarizeMessages(session)
+                }
             } catch (e: Exception) {
                 _error.value = "Ошибка отправки сообщения: ${e.message}"
             } finally {
                 isLoading.value -= session.id
             }
+        }
+    }
+
+    private suspend fun summarizeMessages(session: Session) {
+        val messages = messageRepository.getMessagesFlowBySessionId(session.id).first()
+        if (messages.count() >= 20) {
+            val messagesToSummary = messages.dropLast(10)
+            val summary = summaryRepository.getSummaryForSession(session.id).first()
+                ?.copy(role = MessageRole.ASSISTANT)
+            val summaryMessage = Message(
+                id = "",
+                sessionId = session.id,
+                role = MessageRole.SYSTEM,
+                content = "Please summarize the following conversation concisely. Focus on the main points and decisions made. Use the language of correspondence",
+                timestamp = Clock.System.now(),
+                usedToken = null,
+                cost = null
+            )
+            try {
+                val responseContent = openRouterClient.summarizeMessages(
+                    settings.value,
+                    listOfNotNull(summaryMessage, summary, *messagesToSummary.toTypedArray())
+                )
+                val cost = "%.10f".format(responseContent.cost).dropLastWhile { it == '0' }
+                val newSummary = Message(
+                    id = UUID.randomUUID().toString(),
+                    sessionId = session.id,
+                    role = MessageRole.ASSISTANT,
+                    content = responseContent.content,
+                    timestamp = Clock.System.now(),
+                    usedToken = responseContent.outputUsedToken,
+                    cost = cost,
+                )
+
+                summaryRepository.insertSummary(newSummary)
+                messageRepository.removeMessages(messagesToSummary.map { it.id } )
+
+                val updatedSession = session.copy(totalToken = responseContent.totalUsedToken)
+                sessionRepository.updateSession(updatedSession)
+            } catch (e: Exception) {
+                _error.value = "Ошибка объединения сообщений: ${e.message}"
+            }
+
         }
     }
 
