@@ -54,6 +54,11 @@ compose.desktop {
     }
 }
 
+compose.resources {
+    publicResClass = true
+    packageOfResClass = "com.sbfs.ai"
+}
+
 sqldelight {
     databases.register("AiChallengeDb") {
         packageName.set("com.sbfs.ai.db")

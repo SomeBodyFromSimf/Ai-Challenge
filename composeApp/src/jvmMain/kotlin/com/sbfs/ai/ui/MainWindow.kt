@@ -1,7 +1,10 @@
 package com.sbfs.ai.ui
 
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.Divider
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -12,6 +15,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.sbfs.ai.data.Branch
+import com.sbfs.ai.data.ContextMinimizationStrategy
 import com.sbfs.ai.viewmodel.ChatViewModel
 import kotlin.reflect.KClass
 
@@ -35,6 +40,8 @@ fun MainWindow() {
     val error by viewModel.error.collectAsState()
     val models by viewModel.models.collectAsState()
     val sessionParams by viewModel.sessionParams.collectAsState()
+    val branches by viewModel.branches.collectAsState()
+    val currentBranch by viewModel.currentBranch.collectAsState()
 
     val (messages, isLoading) = messagesPair
 
@@ -69,6 +76,7 @@ fun MainWindow() {
                 // Центральная панель - чат
                 ChatPanel(
                     session = currentSession,
+                    branch = currentBranch,
                     messages = messages,
                     settings = settings,
                     isLoading = isLoading,
@@ -99,6 +107,19 @@ fun MainWindow() {
                         params = sessionParams,
                         onParamChange = { params -> viewModel.onParamsChanged(params) }
                     )
+                    
+                    // Панель управления ветвями для стратегии BRANCHING
+                    if (sessionParams.manageContextStrategy == ContextMinimizationStrategy.BRANCHING) {
+                        BranchPanel(
+                            modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                            branches = branches,
+                            currentBranch = currentBranch,
+                            onCreateBranch = { name -> viewModel.createBranch(name) },
+                            onSwitchToBranch = { branchId -> viewModel.switchToBranch(branchId) },
+                            onDeleteBranch = { branchId -> viewModel.deleteBranch(branchId) },
+                            onMergeBranches = { sourceId, targetId -> viewModel.mergeBranches(sourceId, targetId) }
+                        )
+                    }
                 }
 
                 // Правая панель - управление контекстом и памятью

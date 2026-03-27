@@ -121,7 +121,7 @@ class OpenRouterClient {
                 val request = OpenRouterRequest(
                     model = settings.model?.id ?: throw Exception("Не выбрана модель"),
                     temperature = 0.5,
-                    maxTokens = 200,
+                    maxTokens = 500,
                     messages = messages.map { message ->
                         MessageData(
                             role = message.role,
@@ -161,6 +161,56 @@ class OpenRouterClient {
                 }
             } catch (e: Exception) {
                 throw Exception("Failed to summarize messages: ${e.message}", e)
+            }
+        }
+    }
+    
+    suspend fun sendSystemMessage(content: String, settings: SessionSettings): SendMessageData {
+        return withContext(Dispatchers.IO) {
+            try {
+                val systemMessage = MessageData(
+                    role = MessageRole.SYSTEM,
+                    content = content
+                )
+                
+                val request = OpenRouterRequest(
+                    model = settings.model?.id ?: throw Exception("Не выбрана модель"),
+                    temperature = 0.7,
+                    maxTokens = 500,
+                    messages = listOf(systemMessage),
+                    topP = 1.0,
+                    topK = 0,
+                    minP = 0.0,
+                    topA = 0.0,
+                    frequencyPenalty = 0.0,
+                    presencePenalty = 0.0,
+                    repetitionPenalty = 1.0,
+                    seed = null,
+                    stop = null,
+                    responseFormat = null,
+                )
+
+                val response: HttpResponse = client.post(OPENROUTER_COMPLETIONS_URL) {
+                    contentType(ContentType.Application.Json)
+                    header("Authorization", "Bearer $OPENROUTER_API_KEY")
+                    setBody(request)
+                }
+
+                if (response.status == HttpStatusCode.OK) {
+                    val responseBody = response.body<OpenRouterResponse>()
+
+                    SendMessageData(
+                        content = responseBody.choices.firstOrNull()?.message?.content ?: "Empty response",
+                        inputUsedToken = responseBody.usage.promptTokens,
+                        outputUsedToken = responseBody.usage.completionTokens,
+                        totalUsedToken = responseBody.usage.totalTokens,
+                        cost = responseBody.usage.cost,
+                    )
+                } else {
+                    throw Exception("Error ${response.status}: ${response.bodyAsText()}")
+                }
+            } catch (e: Exception) {
+                throw Exception("Failed to send system message: ${e.message}", e)
             }
         }
     }

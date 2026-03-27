@@ -1,0 +1,40 @@
+CREATE TABLE IF NOT EXISTS branch (
+    id TEXT NOT NULL PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS message_branch (
+    message_id TEXT NOT NULL PRIMARY KEY,
+    branch_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    timestamp INTEGER NOT NULL,
+    usedToken INTEGER,
+    cost TEXT
+);
+
+getAll:
+SELECT * FROM branch WHERE session_id = :session_id;
+
+getById:
+SELECT * FROM branch WHERE id = :id;
+
+insert:
+INSERT OR REPLACE INTO branch VALUES ?;
+
+deleteBranch:
+DELETE FROM branch WHERE id = :id;
+
+deleteAllBySessionId:
+DELETE FROM branch WHERE session_id = :session_id;
+
+insertBranchMessage:
+INSERT OR REPLACE INTO message_branch VALUES ?;
+
+getBranchMessages:
+SELECT * FROM message_branch WHERE branch_id = :branch_id;
+
+removeAllMessagesFromBranch:
+DELETE FROM message_branch WHERE branch_id = :branch_id;

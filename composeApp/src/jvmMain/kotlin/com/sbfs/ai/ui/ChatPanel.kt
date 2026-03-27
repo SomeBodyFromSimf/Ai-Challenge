@@ -13,15 +13,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
+import com.sbfs.ai.data.Branch
 import com.sbfs.ai.data.Message
 import com.sbfs.ai.data.MessageRole
 import com.sbfs.ai.data.Session
 import com.sbfs.ai.data.SessionSettings
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatPanel(
     session: Session?,
+    branch: Branch?,
     messages: List<Message>,
     settings: SessionSettings,
     isLoading: Boolean,
@@ -34,7 +37,7 @@ fun ChatPanel(
     val lazyListState = rememberLazyListState()
 
     LaunchedEffect(messages) {
-        lazyListState.scrollToItem(messages.lastIndex)
+        messages.lastIndex.takeIf { it > 0 }?.let { lazyListState.scrollToItem(it) }
     }
 
     Card(modifier = modifier) {
@@ -43,12 +46,20 @@ fun ChatPanel(
                 .fillMaxSize()
                 .padding(16.dp)
         ) {
+            val title = remember(session, branch) {
+                buildString {
+                    append(session?.title ?: "Новая сессия")
+                    branch?.name?.let {
+                        append("(Бранч ${it})")
+                    }
+                }
+            }
             Text(
-                text = session?.title ?: "Новая сессия",
+                text = title,
                 style = MaterialTheme.typography.headlineSmall
             )
             Text(
-                text = "Использовано токенов: ${ session?.totalToken ?: 0 } из ${settings.model?.contextLength }",
+                text = "Нагрузка контекстного окна: ${ (session?.totalToken ?: 0).toFloat().div(settings.model?.contextLength ?: 1).times(100).roundToInt() }%",
                 style = MaterialTheme.typography.headlineSmall
             )
             
@@ -63,7 +74,7 @@ fun ChatPanel(
                 items(messages) { message ->
                     MessageItem(message = message)
                 }
-                
+
                 // Индикатор загрузки
                 if (isLoading) {
                     item {

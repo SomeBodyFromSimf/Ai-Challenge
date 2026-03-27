@@ -1,0 +1,18 @@
+CREATE TABLE IF NOT EXISTS fact (
+    session_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY (session_id, key)
+);
+
+getAll:
+SELECT * FROM fact WHERE session_id = :session_id;
+
+insert:
+INSERT OR REPLACE INTO fact VALUES ?;
+
+deleteByKey:
+DELETE FROM fact WHERE session_id = :session_id AND key = :key;
+
+clear:
+DELETE FROM fact WHERE session_id = :session_id;

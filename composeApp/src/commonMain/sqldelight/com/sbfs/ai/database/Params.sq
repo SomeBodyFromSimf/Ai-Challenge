@@ -2,7 +2,7 @@ import kotlin.Boolean;
 
 CREATE TABLE IF NOT EXISTS params (
     session_id TEXT NOT NULL PRIMARY KEY,
-    is_summary_enabled INTEGER AS Boolean NOT NULL
+    contextStrategy TEXT NOT NULL
 );
 
 get:

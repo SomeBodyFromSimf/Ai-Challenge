@@ -10,7 +10,7 @@ import com.sbfs.ai.ui.MainWindow
 fun main() = application {
     Window(
         state = rememberWindowState(
-            size = DpSize(1500.dp, 1000.dp)
+            size = DpSize(1650.dp, 1200.dp)
         ),
         onCloseRequest = ::exitApplication,
         title = "AI Challenge"
