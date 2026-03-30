@@ -1,0 +1,16 @@
+CREATE TABLE IF NOT EXISTS user_profile (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT,
+    email TEXT,
+    preferences TEXT NOT NULL, -- JSON string
+    bio TEXT,
+    skills TEXT NOT NULL, -- JSON string
+    interests TEXT NOT NULL, -- JSON string
+    knowledge TEXT NOT NULL -- JSON string
+);
+
+getUserProfile:
+SELECT * FROM user_profile WHERE id = :id;
+
+insertOrUpdateProfile:
+INSERT OR REPLACE INTO user_profile VALUES ?;

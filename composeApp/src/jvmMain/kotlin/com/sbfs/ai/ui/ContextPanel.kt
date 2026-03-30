@@ -7,9 +7,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.sbfs.ai.Res
 import com.sbfs.ai.data.Session
+import com.sbfs.ai.memory
 import com.sbfs.ai.ui.images.Delete
 import com.sbfs.ai.ui.images.Edit
+import org.jetbrains.compose.resources.painterResource
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -20,6 +23,7 @@ fun ContextPanel(
     onCreateNewSession: (String) -> Unit,
     onDeleteSession: (String) -> Unit,
     onClearSession: () -> Unit,
+    onShowSessionMemory: (Session) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(modifier = modifier) {
@@ -32,20 +36,20 @@ fun ContextPanel(
                 text = "Управление сессиями",
                 style = MaterialTheme.typography.headlineSmall
             )
-            
+
             Spacer(modifier = Modifier.height(16.dp))
-            
+
             // Кнопка создания новой сессии
             var showCreateDialog by remember { mutableStateOf(false) }
             var newSessionTitle by remember { mutableStateOf("") }
-            
+
             Button(
                 onClick = { showCreateDialog = true },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Создать новую сессию")
             }
-            
+
             if (showCreateDialog) {
                 AlertDialog(
                     onDismissRequest = { showCreateDialog = false },
@@ -79,17 +83,17 @@ fun ContextPanel(
                     }
                 )
             }
-            
+
             Spacer(modifier = Modifier.height(16.dp))
-            
+
             // Список сессий
             Text(
                 text = "Сохраненные сессии:",
                 style = MaterialTheme.typography.titleMedium
             )
-            
+
             Spacer(modifier = Modifier.height(8.dp))
-            
+
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.weight(1f)
@@ -99,15 +103,16 @@ fun ContextPanel(
                         session = session,
                         isSelected = session.id == currentSession?.id,
                         onSelect = { onSessionSelected(session) },
-                        onDelete = { onDeleteSession(session.id) }
+                        onDelete = { onDeleteSession(session.id) },
+                        onShowMemory = { onShowSessionMemory(session) }
                     )
                 }
             }
-            
+
             // Кнопка очистки сессии
             if (currentSession != null) {
                 Spacer(modifier = Modifier.height(16.dp))
-                
+
                 Button(
                     onClick = onClearSession,
                     modifier = Modifier.fillMaxWidth(),
@@ -128,14 +133,15 @@ fun SessionItem(
     session: Session,
     isSelected: Boolean,
     onSelect: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onShowMemory: () -> Unit
 ) {
     val containerColor = if (isSelected) {
         MaterialTheme.colorScheme.primaryContainer
     } else {
         MaterialTheme.colorScheme.surfaceVariant
     }
-    
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = containerColor)
@@ -158,7 +164,7 @@ fun SessionItem(
                     style = MaterialTheme.typography.bodySmall
                 )
             }
-            
+
             Row {
                 IconButton(onClick = onSelect) {
                     Icon(
@@ -170,6 +176,12 @@ fun SessionItem(
                     Icon(
                         imageVector = Delete,
                         contentDescription = "Удалить"
+                    )
+                }
+                IconButton(onClick = onShowMemory) {
+                    Icon(
+                        painter = painterResource(Res.drawable.memory),
+                        contentDescription = "Знания"
                     )
                 }
             }

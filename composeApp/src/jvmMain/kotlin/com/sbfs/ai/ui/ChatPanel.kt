@@ -10,14 +10,15 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
-import com.sbfs.ai.data.Branch
-import com.sbfs.ai.data.Message
-import com.sbfs.ai.data.MessageRole
-import com.sbfs.ai.data.Session
-import com.sbfs.ai.data.SessionSettings
+import com.sbfs.ai.Res
+import com.sbfs.ai.data.*
+import com.sbfs.ai.dropdown
+import org.jetbrains.compose.resources.painterResource
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -29,6 +30,7 @@ fun ChatPanel(
     settings: SessionSettings,
     isLoading: Boolean,
     onSendMessage: (String) -> Unit,
+    onSaveFacts: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var messageText by remember { mutableStateOf("") }
@@ -59,17 +61,19 @@ fun ChatPanel(
                 style = MaterialTheme.typography.headlineSmall
             )
             Text(
-                text = "Нагрузка контекстного окна: ${ (session?.totalToken ?: 0).toFloat().div(settings.model?.contextLength ?: 1).times(100).roundToInt() }%",
+                text = "Нагрузка контекстного окна: ${
+                    (session?.totalToken ?: 0).toFloat().div(settings.model?.contextLength ?: 1).times(100).roundToInt()
+                }%",
                 style = MaterialTheme.typography.headlineSmall
             )
-            
+
             Spacer(modifier = Modifier.height(16.dp))
-            
+
             // Отображение сообщений
             LazyColumn(
                 modifier = Modifier.weight(1f),
                 state = lazyListState,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(messages) { message ->
                     MessageItem(message = message)
@@ -96,9 +100,9 @@ fun ChatPanel(
                     }
                 }
             }
-            
+
             Spacer(modifier = Modifier.height(16.dp))
-            
+
             // Поле ввода сообщения
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -115,17 +119,53 @@ fun ChatPanel(
                     maxLines = 3,
                     enabled = !isLoading
                 )
-                
-                Button(
-                    onClick = {
-                        if (messageText.isNotBlank()) {
-                            onSendMessage(messageText)
-                            messageText = ""
+                var expanded by remember { mutableStateOf(false) }
+
+                Box {
+                    Button(
+                        onClick = { expanded = true },
+                        enabled = messageText.isNotBlank() && !isLoading
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Отправить")
+                            Icon(
+                                modifier = Modifier.graphicsLayer {
+                                    rotationZ = if (expanded) 0f else 180f
+                                },
+                                painter = painterResource(Res.drawable.dropdown),
+                                contentDescription = null
+                            )
                         }
-                    },
-                    enabled = messageText.isNotBlank() && !isLoading
-                ) {
-                    Text("Отправить")
+                    }
+
+                    DropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Отправить в текущий диалог") },
+                            onClick = {
+                                if (messageText.isNotBlank()) {
+                                    onSendMessage(messageText)
+                                    messageText = ""
+                                }
+                                expanded = false
+                            }
+                        )
+
+                        DropdownMenuItem(
+                            text = { Text("Сохранить в память сессии") },
+                            onClick = {
+                                if (messageText.isNotBlank()) {
+                                    onSaveFacts(messageText)
+                                    messageText = ""
+                                }
+                                expanded = false
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -179,6 +219,4 @@ fun MessageItem(message: Message) {
             }
         }
     }
-    
-
 }

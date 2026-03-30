@@ -11,8 +11,6 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.*
-import kotlin.collections.emptyList
-import kotlin.collections.map
 import kotlin.time.Clock
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -28,11 +26,14 @@ class ChatViewModel : ViewModel() {
     private val summaryRepository = SummaryRepository(db)
     private val factRepository = FactRepository(db)
     private val branchRepository = BranchRepository(db)
+    private val userProfileRepository = UserProfileRepository(db)
+
+    private val sessionMemoryRepository = SessionMemoryRepository(db)
     private val openRouterClient = OpenRouterClient()
-    
+
     val sessions = sessionRepository.getAllSessions()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), emptyList())
-    
+
     private val currentSessionId = MutableStateFlow<String?>(null)
     val currentSession: StateFlow<Session?> = combine(
         sessions,
@@ -41,12 +42,21 @@ class ChatViewModel : ViewModel() {
         s.find { it.id == id }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), null)
     private val isLoading = MutableStateFlow<Set<LoadingData>>(hashSetOf())
-    
+
     // Для стратегии BRANCHING
 
     val branches: StateFlow<List<Branch>> = currentSessionId.flatMapLatest { sessionId ->
         if (sessionId != null) {
             branchRepository.getBranchesBySessionId(sessionId)
+        } else {
+            flowOf(emptyList())
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), emptyList())
+
+    val sessionMemory: StateFlow<List<String>> = currentSessionId.flatMapLatest { sessionId ->
+        if (sessionId != null) {
+            sessionMemoryRepository.getMemoryBySessionId(sessionId)
+                .map { list -> list.map { it.data } }
         } else {
             flowOf(emptyList())
         }
@@ -85,6 +95,7 @@ class ChatViewModel : ViewModel() {
             ContextMinimizationStrategy.SUMMARY -> {
                 summaryRepository.getSummaryForSession(sessionId)
             }
+
             ContextMinimizationStrategy.STICKY_FACTS -> {
                 factRepository.getFactsBySessionId(sessionId)
                     .map {
@@ -103,6 +114,7 @@ class ChatViewModel : ViewModel() {
                             }
                     }
             }
+
             ContextMinimizationStrategy.SLIDING -> flowOf(null)
             ContextMinimizationStrategy.BRANCHING -> flowOf(null)
             ContextMinimizationStrategy.NO_STRATEGY -> flowOf(null)
@@ -126,13 +138,17 @@ class ChatViewModel : ViewModel() {
             flowOf(emptyList<Message>() to false)
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), emptyList<Message>() to false)
-    
+
     private val _settings = MutableStateFlow(SessionSettings())
     val settings: StateFlow<SessionSettings> = _settings.asStateFlow()
-    
+
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
-    
+
+    // Профиль пользователя
+    val userProfile = userProfileRepository.getUserProfile()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), null)
+
     init {
         viewModelScope.launch {
             sessions
@@ -143,7 +159,7 @@ class ChatViewModel : ViewModel() {
                 }
         }
     }
-    
+
     fun selectSession(session: Session) {
         viewModelScope.launch {
             try {
@@ -155,7 +171,7 @@ class ChatViewModel : ViewModel() {
             }
         }
     }
-    
+
     fun createNewSession(title: String) {
         viewModelScope.launch {
             try {
@@ -167,7 +183,7 @@ class ChatViewModel : ViewModel() {
             }
         }
     }
-    
+
     fun updateSettings(newSettings: SessionSettings) {
         _settings.value = newSettings
         currentSession.value?.let { session ->
@@ -181,7 +197,7 @@ class ChatViewModel : ViewModel() {
             }
         }
     }
-    
+
     fun deleteSession(sessionId: String) {
         viewModelScope.launch {
             try {
@@ -206,7 +222,7 @@ class ChatViewModel : ViewModel() {
         }
     }
 
-    
+
     fun clearCurrentSession() {
         viewModelScope.launch {
             try {
@@ -221,7 +237,7 @@ class ChatViewModel : ViewModel() {
             }
         }
     }
-    
+
     fun sendMessage(content: String) {
         viewModelScope.launch {
             val session = currentSession.value ?: run {
@@ -240,7 +256,7 @@ class ChatViewModel : ViewModel() {
             try {
                 isLoading.value += LoadingData(session.id, branchId)
                 _error.value = null
-                
+
                 // Создаем и сохраняем сообщение пользователя
                 val userMessage = Message(
                     id = UUID.randomUUID().toString(),
@@ -251,7 +267,7 @@ class ChatViewModel : ViewModel() {
                     usedToken = null,
                     cost = null
                 )
-                val currentMessages = messages.value.first
+                val currentMessages = messages.value.first.addStorageData()
                 if (branchId != null) {
                     branchRepository.insertMessageBranch(branchId, userMessage)
                 } else {
@@ -293,9 +309,17 @@ class ChatViewModel : ViewModel() {
         when (sessionParams.value.manageContextStrategy) {
             ContextMinimizationStrategy.NO_STRATEGY -> {}
             ContextMinimizationStrategy.BRANCHING -> {}
-            ContextMinimizationStrategy.SUMMARY -> { summarizeMessages(session) }
-            ContextMinimizationStrategy.SLIDING -> { slidingMessages(session) }
-            ContextMinimizationStrategy.STICKY_FACTS -> { factMessages(session) }
+            ContextMinimizationStrategy.SUMMARY -> {
+                summarizeMessages(session)
+            }
+
+            ContextMinimizationStrategy.SLIDING -> {
+                slidingMessages(session)
+            }
+
+            ContextMinimizationStrategy.STICKY_FACTS -> {
+                factMessages(session)
+            }
         }
     }
 
@@ -314,10 +338,11 @@ class ChatViewModel : ViewModel() {
                 usedToken = null,
                 cost = null
             )
+            val messages = listOfNotNull(summaryMessage, summary, *messagesToSummary.toTypedArray())
             try {
                 val responseContent = openRouterClient.summarizeMessages(
                     settings.value,
-                    listOfNotNull(summaryMessage, summary, *messagesToSummary.toTypedArray())
+                    messages.addStorageData()
                 )
                 val cost = "%.10f".format(responseContent.cost).dropLastWhile { it == '0' }
                 val newSummary = Message(
@@ -331,7 +356,7 @@ class ChatViewModel : ViewModel() {
                 )
 
                 summaryRepository.insertSummary(newSummary)
-                messageRepository.removeMessages(messagesToSummary.map { it.id } )
+                messageRepository.removeMessages(messagesToSummary.map { it.id })
 
                 val updatedSession = session.copy(totalToken = responseContent.totalUsedToken)
                 sessionRepository.updateSession(updatedSession)
@@ -358,7 +383,8 @@ class ChatViewModel : ViewModel() {
         // Получаем последние N сообщений (например, 10)
         val messages = messageRepository.getMessagesFlowBySessionId(session.id).first()
         val recentMessages = messages.takeLast(10)
-        
+
+        val storagePrompt = getStoragePrompt()
         // Создаем промпт для извлечения фактов
         val extractionPrompt = """
             Пожалуйста, извлеките важные факты из приведенного ниже разговора и обновите существующие факты.
@@ -377,10 +403,16 @@ class ChatViewModel : ViewModel() {
             Если какой-либо факт больше не имеет значения, опустите его в ответе.
             Пишите факты на языке переписки.
         """.trimIndent()
-        
+        val resPrompt = buildString {
+            if (storagePrompt != null) {
+                append(storagePrompt.trim())
+                append("\n")
+            }
+            append(extractionPrompt)
+        }
         try {
             // Отправляем запрос для извлечения фактов
-            val extractedFactsContent = openRouterClient.sendSystemMessage(extractionPrompt, settings.value)
+            val extractedFactsContent = openRouterClient.sendSystemMessage(resPrompt, settings.value)
             
             // Парсим полученные факты и обновляем их в базе данных
             val extractedFacts = parseFacts(extractedFactsContent.content)
@@ -392,11 +424,11 @@ class ChatViewModel : ViewModel() {
             _error.value = "Ошибка извлечения фактов: ${e.message}"
         }
     }
-    
+
     private fun parseFacts(content: String): List<Fact> {
         val facts = mutableListOf<Fact>()
         val lines = content.lines()
-        
+
         for (line in lines) {
             val colonIndex = line.indexOf(':')
             if (colonIndex > 0 && colonIndex < line.length - 1) {
@@ -407,14 +439,59 @@ class ChatViewModel : ViewModel() {
                 }
             }
         }
-        
+
         return facts
     }
 
     fun clearError() {
         _error.value = null
     }
-    
+
+    /**
+     * Добавляет факт в рабочую память сессии
+     */
+    fun saveSessionData(data: String) {
+        viewModelScope.launch {
+            try {
+                currentSessionId.value?.let { sessionId ->
+                    val data = SessionMemoryData(sessionId, data)
+                    sessionMemoryRepository.insert(data)
+                } ?: run {
+                    _error.value = "Нет активной сессии для сохранения факта"
+                }
+            } catch (e: Exception) {
+                _error.value = "Ошибка сохранения факта: ${e.message}"
+            }
+        }
+    }
+
+    /**
+     * Удаляет факт из рабочей памяти сессии
+     */
+    fun removeFact(key: String) {
+        viewModelScope.launch {
+            try {
+                currentSessionId.value?.let { sessionId ->
+                    sessionMemoryRepository.delete(sessionId, key)
+                } ?: run {
+                    _error.value = "Нет активной сессии для удаления факта"
+                }
+            } catch (e: Exception) {
+                _error.value = "Ошибка удаления факта: ${e.message}"
+            }
+        }
+    }
+
+    fun saveUserProfile(profile: UserProfile) {
+        viewModelScope.launch {
+            try {
+                userProfileRepository.saveUserProfile(profile)
+            } catch (e: Exception) {
+                _error.value = "Ошибка сохранения профиля: ${e.message}"
+            }
+        }
+    }
+
     // Функции для работы с ветвями (BRANCHING strategy)
     fun createBranch(name: String) {
         viewModelScope.launch {
@@ -434,13 +511,13 @@ class ChatViewModel : ViewModel() {
             }
         }
     }
-    
+
     fun switchToBranch(branchId: String?) {
         viewModelScope.launch {
             currentBranchId.value = branchId
         }
     }
-    
+
     fun deleteBranch(branchId: String) {
         viewModelScope.launch {
             try {
@@ -450,7 +527,85 @@ class ChatViewModel : ViewModel() {
             }
         }
     }
-    
+
+    suspend fun List<Message>.addStorageData(): List<Message> {
+        val storageContent = getStoragePrompt() ?: return this
+
+        // Ищем существующее системное сообщение
+        val existingSystemMessageIndex = indexOfFirst { it.role == MessageRole.SYSTEM }
+
+        return if (existingSystemMessageIndex != -1) {
+            // Если системное сообщение существует, обновляем его
+            val updatedList = toMutableList()
+            val existingSystemMessage = updatedList[existingSystemMessageIndex]
+            val updatedContent = buildString {
+                append(existingSystemMessage.content)
+                if (!existingSystemMessage.content.endsWith("\n") && existingSystemMessage.content.isNotEmpty()) {
+                    append("\n")
+                }
+                append(storageContent)
+            }
+
+            updatedList[existingSystemMessageIndex] = existingSystemMessage.copy(
+                content = updatedContent.trim()
+            )
+            updatedList.toList()
+        } else {
+            // Если системного сообщения нет, создаем новое
+            val systemMessage = Message(
+                id = UUID.randomUUID().toString(),
+                sessionId = "",
+                role = MessageRole.SYSTEM,
+                content = storageContent.trim(),
+                timestamp = Clock.System.now(),
+                usedToken = null,
+                cost = null
+            )
+
+            // Добавляем системное сообщение в начало списка
+            listOf(systemMessage) + this
+        }
+    }
+
+    private suspend fun getStoragePrompt() : String? {
+        val sessionId = currentSessionId.value ?: return null
+        val userProfile = userProfileRepository.getUserProfile().first()
+        val sessionMemory = sessionMemoryRepository.getMemoryBySessionId(sessionId).first()
+
+        // Если нет данных для добавления, возвращаем исходный список
+        if (userProfile == UserProfile.DEFAULT && sessionMemory.isEmpty()) {
+            return null
+        }
+
+        // Создаем контент для системного сообщения
+        return buildString {
+            userProfile.let { p ->
+                append("User Profile:\n")
+                p.name?.let { append("Name: $it\n") }
+                p.bio?.let { append("About me: $it\n") }
+                p.preferences.toList().joinToString { "${it.first}: ${it.second}" }
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { append("Preferences: $it\n") }
+                p.knowledge.joinToString()
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { append("Knowledge: $it\n") }
+                p.skills.joinToString()
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { append("Skills: $it\n") }
+                p.interests.joinToString()
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { append("Interests: $it\n") }
+            }
+
+            if (sessionMemory.isNotEmpty()) {
+                append("Session Memory:\n")
+                sessionMemory.forEach { data ->
+                    append("- ${data.data}\n")
+                }
+            }
+        }.takeIf { it.isNotEmpty() }
+    }
+
     fun mergeBranches(sourceBranchId: String, targetBranchId: String) {
         viewModelScope.launch {
             try {
@@ -458,12 +613,17 @@ class ChatViewModel : ViewModel() {
                 val targetBranch = branchRepository.getBranchById(targetBranchId).first()!!
                 val systemMessage = systemMessage.first()
                 val generalMessages = messageRepository.getMessagesFlowBySessionId(sourceBranch.sessionId).first()
-                val sourceBranchMessages = branchRepository.getMessageBranches(sourceBranch.sessionId, sourceBranch.id).first()
-                val targetBranchMessages = branchRepository.getMessageBranches(targetBranch.sessionId, targetBranch.id).first()
+                val sourceBranchMessages =
+                    branchRepository.getMessageBranches(sourceBranch.sessionId, sourceBranch.id).first()
+                val targetBranchMessages =
+                    branchRepository.getMessageBranches(targetBranch.sessionId, targetBranch.id).first()
 
-
-
+                val profilePrompt = getStoragePrompt()
                 val newSystemPrompt = buildString {
+                    profilePrompt?.let {
+                        append(it)
+                        append("\n")
+                    }
                     systemMessage?.let {
                         append("Previous system message:\n")
                         append(it.content)
@@ -471,8 +631,10 @@ class ChatViewModel : ViewModel() {
                     }
                     append("Please merge history of two branches.\n")
                     append("The messages are in this order: System(this).\n")
-                    generalMessages.count().takeIf { it > 0 }?.let { append("After $it messages from the general history\n") }
-                    sourceBranchMessages.count().takeIf { it > 0 }?.let { append("After $it messages from the first branch\n") }
+                    generalMessages.count().takeIf { it > 0 }
+                        ?.let { append("After $it messages from the general history\n") }
+                    sourceBranchMessages.count().takeIf { it > 0 }
+                        ?.let { append("After $it messages from the first branch\n") }
                     targetBranchMessages.count().takeIf { it > 0 }?.let { append("After $it from the second branch\n") }
                     append("Please write a summary exclusively about merging branches")
                 }
@@ -486,7 +648,12 @@ class ChatViewModel : ViewModel() {
                     cost = null
                 )
 
-                val messages = listOfNotNull(newSystemMessage, *generalMessages.toTypedArray(), *sourceBranchMessages.toTypedArray(), *targetBranchMessages.toTypedArray())
+                val messages = listOfNotNull(
+                    newSystemMessage,
+                    *generalMessages.toTypedArray(),
+                    *sourceBranchMessages.toTypedArray(),
+                    *targetBranchMessages.toTypedArray()
+                )
 
                 try {
                     val responseContent = openRouterClient.summarizeMessages(
