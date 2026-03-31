@@ -17,8 +17,8 @@ class SessionRepository(
 ) {
     private val sessionQueries = db.sessionQueries
 
-    fun getAllSessions(): Flow<List<Session>> {
-        return sessionQueries.getAll()
+    fun getAllSessions(userId: String): Flow<List<Session>> {
+        return sessionQueries.getAll(userId)
             .asFlow()
             .mapToList(Dispatchers.IO)
             .map { list ->
@@ -36,8 +36,8 @@ class SessionRepository(
         }
     }
     
-    fun getSessionById(id: String): Session? {
-        val sessionEntity = sessionQueries.getByKey(id).executeAsOneOrNull()
+    fun getSessionById(id: String, userId: String): Session? {
+        val sessionEntity = sessionQueries.getByKey(id, userId).executeAsOneOrNull()
         return sessionEntity?.let { entity ->
             val settings = Json.decodeFromString<SessionSettings>(sessionEntity.settings_data)
             Session(
@@ -51,13 +51,14 @@ class SessionRepository(
         }
     }
     
-    fun createSession(title: String, settings: SessionSettings): Session {
+    fun createSession(title: String, userId: String, settings: SessionSettings): Session {
         val now = Clock.System.now()
         val id = java.util.UUID.randomUUID().toString()
         
         sessionQueries.insert(
             com.sbfs.ai.database.Session(
                 id = id,
+                userId = userId,
                 title = title,
                 created_at = now.toEpochMilliseconds(),
                 updated_at = now.toEpochMilliseconds(),

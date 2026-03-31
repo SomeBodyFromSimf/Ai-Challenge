@@ -15,6 +15,7 @@ import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.sbfs.ai.data.ContextMinimizationStrategy
 import com.sbfs.ai.viewmodel.ChatViewModel
+import kotlinx.coroutines.launch
 import kotlin.reflect.KClass
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -45,6 +46,8 @@ fun MainWindow() {
 
     // Состояние для модального окна профиля
     var showProfileModal by remember { mutableStateOf(false) }
+    var showProfileCreateModal by remember { mutableStateOf(false) }
+    var showProfileChangeModal by remember { mutableStateOf(false) }
 
     // Состояние для модального окна памяти сессии
     var showSessionMemoryModal by remember { mutableStateOf(false) }
@@ -53,10 +56,16 @@ fun MainWindow() {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("AI Challenge") },
+                title = { Text("AI Challenge. Пользователь: ${userProfile?.name}") },
                 actions = {
                     // Кнопка профиля
-                    Button(onClick = { showProfileModal = true }) {
+                    Button(onClick = {
+                        if (userProfile != null) {
+                            showProfileModal = true
+                        } else {
+                            showProfileCreateModal = true
+                        }
+                    }) {
                         Text("Профиль")
                     }
                 }
@@ -175,6 +184,10 @@ fun MainWindow() {
                             userProfile?.let { profile ->
                                 ProfilePanel(
                                     profile = profile,
+                                    onChooseAnotherAccount = {
+                                        showProfileModal = false
+                                        showProfileChangeModal = true
+                                    },
                                     onProfileChange = { updatedProfile ->
                                         viewModel.saveUserProfile(updatedProfile)
                                     },
@@ -183,6 +196,99 @@ fun MainWindow() {
                             } ?: CircularProgressIndicator(
                                 modifier = Modifier.align(Alignment.Center)
                             )
+                        }
+                    }
+                )
+            }
+
+            val scope = rememberCoroutineScope()
+
+            if (showProfileChangeModal) {
+                val users by viewModel.profiles.collectAsState()
+
+                AlertDialog(
+                    onDismissRequest = { showProfileChangeModal = false },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            showProfileChangeModal = false
+                            showProfileCreateModal = true
+                        }) {
+                            Text("Создать")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showProfileChangeModal = false }) {
+                            Text("Закрыть")
+                        }
+                    },
+                    text = {
+                        Column {
+                            users.forEach { user ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                    .padding(16.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(user.name.orEmpty())
+                                    Button(
+                                        onClick = {
+                                            viewModel.setProfile(user)
+                                            showProfileChangeModal = false
+                                        },
+                                        content = {
+                                            Text("Выбрать")
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                )
+            }
+
+            if (showProfileCreateModal) {
+                var name by remember { mutableStateOf("") }
+                AlertDialog(
+                    onDismissRequest = { showProfileCreateModal = false },
+                    confirmButton = {
+                        if (name.isNotEmpty()) {
+                            TextButton(onClick = {
+                                showProfileCreateModal = false
+                                scope.launch {
+                                    viewModel.createNewUser(name)
+                                    showProfileModal = true
+                                }
+                            }
+                            ) {
+                                Text("Сохранить")
+                            }
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showProfileCreateModal = false }) {
+                            Text("Закрыть")
+                        }
+                    },
+                    text = {
+                        Column(
+                            modifier = Modifier
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text("Введите Ваше имя")
+                            OutlinedTextField(
+                                value = name,
+                                onValueChange = { value ->
+                                    name = value
+                                },
+                                label = { Text("Имя") },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
                         }
                     }
                 )

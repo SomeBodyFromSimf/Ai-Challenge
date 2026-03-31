@@ -1,6 +1,7 @@
 package com.sbfs.ai.repository
 
 import app.cash.sqldelight.coroutines.asFlow
+import app.cash.sqldelight.coroutines.mapToList
 import app.cash.sqldelight.coroutines.mapToOneOrNull
 import com.sbfs.ai.data.UserProfile
 import com.sbfs.ai.db.AiChallengeDb
@@ -16,8 +17,8 @@ class UserProfileRepository(
     private val queries = db.userProfileQueries
     private val json = Json { ignoreUnknownKeys = true }
 
-    fun getUserProfile(id: String = "default"): Flow<UserProfile> {
-        return queries.getUserProfile(id)
+    fun getUserProfile(): Flow<UserProfile?> {
+        return queries.getCurrentUserProfile()
             .asFlow()
             .mapToOneOrNull(Dispatchers.IO)
             .map { profileEntity ->
@@ -25,14 +26,29 @@ class UserProfileRepository(
                     UserProfile(
                         id = it.id,
                         name = it.name,
-                        email = it.email,
                         preferences = json.decodeFromString<Map<String, String>>(it.preferences),
-                        bio = it.bio,
-                        skills = json.decodeFromString<List<String>>(it.skills),
-                        interests = json.decodeFromString<List<String>>(it.interests),
-                        knowledge = json.decodeFromString<List<String>>(it.knowledge)
+                        limitationsForLLM = json.decodeFromString<List<String>>(it.limitationsForLLM),
+                        additionalInfo = it.additionalInfo,
                     )
-                } ?: UserProfile.DEFAULT
+                }
+            }
+    }
+
+    fun getAllUsers(): Flow<List<UserProfile>> {
+        return queries.getAllProfiles()
+            .asFlow()
+            .mapToList(Dispatchers.IO)
+            .map { list ->
+                list.map {
+                    UserProfile(
+                        id = it.id,
+                        name = it.name,
+                        isCurrent = it.isCurrent,
+                        preferences = json.decodeFromString<Map<String, String>>(it.preferences),
+                        limitationsForLLM = json.decodeFromString<List<String>>(it.limitationsForLLM),
+                        additionalInfo = it.additionalInfo,
+                    )
+                }
             }
     }
 
@@ -41,13 +57,15 @@ class UserProfileRepository(
             com.sbfs.ai.database.User_profile(
                 id = profile.id,
                 name = profile.name,
-                email = profile.email,
+                isCurrent = profile.isCurrent,
                 preferences = json.encodeToString(profile.preferences),
-                bio = profile.bio,
-                skills = json.encodeToString(profile.skills),
-                interests = json.encodeToString(profile.interests),
-                knowledge = json.encodeToString(profile.knowledge)
+                limitationsForLLM = json.encodeToString(profile.limitationsForLLM),
+                additionalInfo = profile.additionalInfo,
             )
         )
+    }
+
+    fun removeCurrent() {
+        queries.removeCurrent()
     }
 }

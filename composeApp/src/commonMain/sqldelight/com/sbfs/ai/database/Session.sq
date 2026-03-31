@@ -1,17 +1,19 @@
 CREATE TABLE IF NOT EXISTS session (
-    id TEXT NOT NULL PRIMARY KEY,
+    id TEXT NOT NULL,
+    userId TEXT NOT NULL,
     title TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     settings_data TEXT NOT NULL,
-    totalToken INTEGER
+    totalToken INTEGER,
+    PRIMARY KEY (id, userId)
 );
 
 getAll:
-SELECT * FROM session;
+SELECT * FROM session WHERE userId = :userId;
 
 getByKey:
-SELECT * FROM session WHERE id = :id;
+SELECT * FROM session WHERE id = :id AND userId = :userId;
 
 insert:
 INSERT OR REPLACE INTO session VALUES ?;

@@ -31,8 +31,21 @@ class ChatViewModel : ViewModel() {
     private val sessionMemoryRepository = SessionMemoryRepository(db)
     private val openRouterClient = OpenRouterClient()
 
-    val sessions = sessionRepository.getAllSessions()
+
+    // Профиль пользователя
+    val userProfile = userProfileRepository.getUserProfile()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), null)
+
+    val profiles = userProfileRepository.getAllUsers()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), emptyList())
+
+    val sessions = userProfile.flatMapLatest {
+        if (it == null) {
+            flowOf(emptyList())
+        } else {
+            sessionRepository.getAllSessions(it.id)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), emptyList())
 
     private val currentSessionId = MutableStateFlow<String?>(null)
     val currentSession: StateFlow<Session?> = combine(
@@ -145,18 +158,18 @@ class ChatViewModel : ViewModel() {
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
-    // Профиль пользователя
-    val userProfile = userProfileRepository.getUserProfile()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), null)
-
     init {
         viewModelScope.launch {
-            sessions
-                .firstOrNull { it.isNotEmpty() }
-                ?.maxBy { session -> session.updatedAt }
-                ?.let { session ->
-                    selectSession(session)
-                }
+            userProfile.filterNotNull().collect {
+                sessions
+                    .firstOrNull { it.isNotEmpty() }
+                    ?.maxBy { session -> session.updatedAt }
+                    ?.let { session ->
+                        selectSession(session)
+                    }
+            }
+
+
         }
     }
 
@@ -175,7 +188,8 @@ class ChatViewModel : ViewModel() {
     fun createNewSession(title: String) {
         viewModelScope.launch {
             try {
-                val newSession = sessionRepository.createSession(title, _settings.value)
+                val profile = userProfile.value ?: throw IllegalStateException("Сначала создайте пользователя")
+                val newSession = sessionRepository.createSession(title, profile.id, _settings.value)
                 currentSessionId.value = newSession.id
                 currentBranchId.value = null
             } catch (e: Exception) {
@@ -573,28 +587,23 @@ class ChatViewModel : ViewModel() {
         val sessionMemory = sessionMemoryRepository.getMemoryBySessionId(sessionId).first()
 
         // Если нет данных для добавления, возвращаем исходный список
-        if (userProfile == UserProfile.DEFAULT && sessionMemory.isEmpty()) {
+        if (userProfile == null && sessionMemory.isEmpty()) {
             return null
         }
 
         // Создаем контент для системного сообщения
         return buildString {
-            userProfile.let { p ->
-                append("User Profile:\n")
-                p.name?.let { append("Name: $it\n") }
-                p.bio?.let { append("About me: $it\n") }
+            userProfile?.let { p ->
+                append("Профиль пользователя:\n")
                 p.preferences.toList().joinToString { "${it.first}: ${it.second}" }
                     .takeIf { it.isNotEmpty() }
-                    ?.let { append("Preferences: $it\n") }
-                p.knowledge.joinToString()
+                    ?.let { append("Предпочтения:\n$it\n") }
+                p.limitationsForLLM.joinToString(separator = ";")
                     .takeIf { it.isNotEmpty() }
-                    ?.let { append("Knowledge: $it\n") }
-                p.skills.joinToString()
-                    .takeIf { it.isNotEmpty() }
-                    ?.let { append("Skills: $it\n") }
-                p.interests.joinToString()
-                    .takeIf { it.isNotEmpty() }
-                    ?.let { append("Interests: $it\n") }
+                    ?.let { append("Нельзя ни в коем случае делать: $it\n") }
+                p.additionalInfo
+                    ?.takeIf { it.isNotEmpty() }
+                    ?.let { append("До информация: $it\n") }
             }
 
             if (sessionMemory.isNotEmpty()) {
@@ -681,5 +690,19 @@ class ChatViewModel : ViewModel() {
                 _error.value = "Ошибка слияния ветвей: ${e.message}"
             }
         }
+    }
+
+    fun createNewUser(name: String) {
+        userProfileRepository.saveUserProfile(
+            UserProfile(
+                id = UUID.randomUUID().toString(),
+                name = name
+            )
+        )
+    }
+
+    fun setProfile(profile: UserProfile) {
+        userProfileRepository.removeCurrent()
+        userProfileRepository.saveUserProfile(profile.copy(isCurrent = true))
     }
 }

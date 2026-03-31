@@ -1,5 +1,3 @@
-import kotlin.Boolean;
-
 CREATE TABLE IF NOT EXISTS params (
     session_id TEXT NOT NULL PRIMARY KEY,
     contextStrategy TEXT NOT NULL

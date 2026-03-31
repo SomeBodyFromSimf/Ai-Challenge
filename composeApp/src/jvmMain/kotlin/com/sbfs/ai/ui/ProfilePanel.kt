@@ -5,16 +5,21 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.sbfs.ai.Res
+import com.sbfs.ai.change_user
 import com.sbfs.ai.data.UserProfile
+import org.jetbrains.compose.resources.painterResource
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfilePanel(
     profile: UserProfile,
     onProfileChange: (UserProfile) -> Unit,
+    onChooseAnotherAccount: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -23,10 +28,23 @@ fun ProfilePanel(
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        Text(
-            text = "Профиль пользователя",
-            style = MaterialTheme.typography.headlineMedium
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = "Профиль пользователя",
+                style = MaterialTheme.typography.headlineMedium
+            )
+            IconButton(onClick = onChooseAnotherAccount) {
+                Icon(
+                    painter = painterResource(Res.drawable.change_user),
+                    contentDescription = "Изменить"
+                )
+            }
+        }
+
 
         var internalProfile by remember(profile) {
             mutableStateOf(profile)
@@ -42,31 +60,6 @@ fun ProfilePanel(
             },
             label = { Text("Имя") },
             modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Email
-        OutlinedTextField(
-            value = internalProfile.email ?: "",
-            onValueChange = { value ->
-                internalProfile = internalProfile.copy(email = value)
-            },
-            label = { Text("Email") },
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Биография
-        OutlinedTextField(
-            value = internalProfile.bio ?: "",
-            onValueChange = { value ->
-                internalProfile = internalProfile.copy(bio = value)
-            },
-            label = { Text("Биография") },
-            modifier = Modifier.fillMaxWidth(),
-            maxLines = 5
         )
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -138,48 +131,48 @@ fun ProfilePanel(
         Spacer(modifier = Modifier.height(16.dp))
 
         Text(
-            text = "Навыки",
+            text = "Ограничения",
             style = MaterialTheme.typography.titleMedium
         )
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        var skillInput by remember { mutableStateOf("") }
+        var limitationInput by remember { mutableStateOf("") }
 
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             OutlinedTextField(
-                value = skillInput,
-                onValueChange = { skillInput = it },
-                label = { Text("Навык") },
+                value = limitationInput,
+                onValueChange = { limitationInput = it },
+                label = { Text("Ограничения") },
                 modifier = Modifier.weight(1f)
             )
 
             Button(
                 onClick = {
-                    if (skillInput.isNotBlank() && !internalProfile.skills.contains(skillInput)) {
-                        internalProfile = internalProfile.copy(skills = internalProfile.skills + skillInput)
-                        skillInput = ""
+                    if (limitationInput.isNotBlank() && !internalProfile.limitationsForLLM.contains(limitationInput)) {
+                        internalProfile = internalProfile.copy(limitationsForLLM = internalProfile.limitationsForLLM + limitationInput)
+                        limitationInput = ""
                     }
                 },
-                enabled = skillInput.isNotBlank()
+                enabled = limitationInput.isNotBlank()
             ) {
                 Text("Добавить")
             }
         }
 
-        // Список навыков
+        // Список ограничений
         FlowRow(
             modifier = Modifier.fillMaxWidth()
         ) {
-            internalProfile.skills.forEach { skill ->
+            internalProfile.limitationsForLLM.forEach { limitation ->
                 Chip(
                     onClick = {
-                        internalProfile = internalProfile.copy(skills = internalProfile.skills - skill)
+                        internalProfile = internalProfile.copy(limitationsForLLM = internalProfile.limitationsForLLM - limitation)
                     },
-                    label = { Text(skill) },
+                    label = { Text(limitation) },
                     modifier = Modifier.padding(4.dp)
                 )
             }
@@ -188,104 +181,27 @@ fun ProfilePanel(
         Spacer(modifier = Modifier.height(16.dp))
 
         Text(
-            text = "Интересы",
+            text = "Доп информация для LLM",
             style = MaterialTheme.typography.titleMedium
         )
 
         Spacer(modifier = Modifier.height(8.dp))
-
-        var interestInput by remember { mutableStateOf("") }
 
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             OutlinedTextField(
-                value = interestInput,
-                onValueChange = { interestInput = it },
-                label = { Text("Интерес") },
+                value = internalProfile.additionalInfo.orEmpty(),
+                onValueChange = { internalProfile = internalProfile.copy(additionalInfo = it) },
+                label = { Text("Инфо") },
+                placeholder = { Text("Укажите любую важную информацию которую посчитаете нужной") },
+                minLines = 5,
                 modifier = Modifier.weight(1f)
             )
-
-            Button(
-                onClick = {
-                    if (interestInput.isNotBlank() && !internalProfile.interests.contains(interestInput)) {
-                        internalProfile = internalProfile.copy(interests = internalProfile.interests + interestInput)
-                        interestInput = ""
-                    }
-                },
-                enabled = interestInput.isNotBlank()
-            ) {
-                Text("Добавить")
-            }
         }
 
-        // Список интересов
-        FlowRow(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            internalProfile.interests.forEach { interest ->
-                Chip(
-                    onClick = {
-                        internalProfile = internalProfile.copy(interests = internalProfile.interests - interestInput)
-                    },
-                    label = { Text(interest) },
-                    modifier = Modifier.padding(4.dp)
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(
-            text = "Знания",
-            style = MaterialTheme.typography.titleMedium
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        var knowledgeInput by remember { mutableStateOf("") }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            OutlinedTextField(
-                value = knowledgeInput,
-                onValueChange = { knowledgeInput = it },
-                label = { Text("Знание") },
-                modifier = Modifier.weight(1f)
-            )
-
-            Button(
-                onClick = {
-                    if (knowledgeInput.isNotBlank() && !internalProfile.knowledge.contains(knowledgeInput)) {
-                        internalProfile = internalProfile.copy(knowledge = internalProfile.knowledge + knowledgeInput)
-                        knowledgeInput = ""
-                    }
-                },
-                enabled = knowledgeInput.isNotBlank()
-            ) {
-                Text("Добавить")
-            }
-        }
-
-        // Список знаний
-        FlowRow(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            internalProfile.knowledge.forEach { knowledge ->
-                Chip(
-                    onClick = {
-                        internalProfile = internalProfile.copy(knowledge = internalProfile.knowledge - knowledgeInput)
-                    },
-                    label = { Text(knowledge) },
-                    modifier = Modifier.padding(4.dp)
-                )
-            }
-        }
-
-        if (profile != internalProfile) {
+        if (profile != internalProfile && internalProfile.name.isNullOrEmpty().not()) {
             Button(onClick = {
                 onProfileChange(internalProfile)
             }) {

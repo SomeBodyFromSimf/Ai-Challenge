@@ -1,16 +1,22 @@
+import kotlin.Boolean;
+
 CREATE TABLE IF NOT EXISTS user_profile (
     id TEXT NOT NULL PRIMARY KEY,
     name TEXT,
-    email TEXT,
+    isCurrent INTEGER AS Boolean NOT NULL,
     preferences TEXT NOT NULL, -- JSON string
-    bio TEXT,
-    skills TEXT NOT NULL, -- JSON string
-    interests TEXT NOT NULL, -- JSON string
-    knowledge TEXT NOT NULL -- JSON string
+    limitationsForLLM TEXT NOT NULL, -- JSON string
+    additionalInfo TEXT
 );
 
-getUserProfile:
-SELECT * FROM user_profile WHERE id = :id;
+getCurrentUserProfile:
+SELECT * FROM user_profile WHERE isCurrent = 1;
+
+getAllProfiles:
+SELECT * FROM user_profile;
+
+removeCurrent:
+UPDATE user_profile SET isCurrent = 0;
 
 insertOrUpdateProfile:
 INSERT OR REPLACE INTO user_profile VALUES ?;
