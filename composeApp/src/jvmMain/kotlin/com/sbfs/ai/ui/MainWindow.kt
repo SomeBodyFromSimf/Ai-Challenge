@@ -37,6 +37,7 @@ fun MainWindow() {
     val messagesPair by viewModel.messages.collectAsState()
     val error by viewModel.error.collectAsState()
     val models by viewModel.models.collectAsState()
+    val taskContext by viewModel.taskContextState.collectAsState()
     val sessionParams by viewModel.sessionParams.collectAsState()
     val branches by viewModel.branches.collectAsState()
     val currentBranch by viewModel.currentBranch.collectAsState()
@@ -102,6 +103,7 @@ fun MainWindow() {
                     isLoading = isLoading,
                     onSendMessage = { message -> viewModel.sendMessage(message) },
                     onSaveFacts = { message -> viewModel.saveSessionData(message) },
+                    taskContext = taskContext,
                     modifier = Modifier
                         .weight(2f)
                         .fillMaxHeight()

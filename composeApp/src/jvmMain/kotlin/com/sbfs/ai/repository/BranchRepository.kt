@@ -111,4 +111,8 @@ class BranchRepository(
     fun removeMessages(branchId: String) {
         branchQueries.removeAllMessagesFromBranch(branchId)
     }
+
+    fun removeMessages(branchId: String, messageId: String) {
+        branchQueries.removeMessage(branchId, messageId)
+    }
 }

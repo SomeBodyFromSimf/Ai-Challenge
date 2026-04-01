@@ -10,6 +10,7 @@ import com.sbfs.ai.repository.*
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
 import java.util.*
 import kotlin.time.Clock
 
@@ -29,6 +30,7 @@ class ChatViewModel : ViewModel() {
     private val userProfileRepository = UserProfileRepository(db)
 
     private val sessionMemoryRepository = SessionMemoryRepository(db)
+    private val taskRepository = TaskRepository(db)
     private val openRouterClient = OpenRouterClient()
 
 
@@ -55,6 +57,16 @@ class ChatViewModel : ViewModel() {
         s.find { it.id == id }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), null)
     private val isLoading = MutableStateFlow<Set<LoadingData>>(hashSetOf())
+
+
+    // Состояние выполнения задачи
+    val taskContextState = currentSessionId.flatMapLatest { sessionId ->
+        if (sessionId != null) {
+            taskRepository.getBySessionId(sessionId)
+        } else {
+            flowOf(null)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), null)
 
     // Для стратегии BRANCHING
 
@@ -237,7 +249,7 @@ class ChatViewModel : ViewModel() {
     }
 
 
-    fun clearCurrentSession() {
+fun clearCurrentSession() {
         viewModelScope.launch {
             try {
                 currentSessionId.value?.let { sessionId ->
@@ -245,11 +257,24 @@ class ChatViewModel : ViewModel() {
                     summaryRepository.deleteSummary(sessionId)
                     sessionRepository.clearTokenInfo(sessionId)
                     branchRepository.clearBranches(sessionId)
+                    taskRepository.deleteTask(sessionId)
                 }
             } catch (e: Exception) {
                 _error.value = "Ошибка очистки сессии: ${e.message}"
             }
         }
+    }
+
+    /**
+     * Извлекает состояние задачи из ответа LLM
+     * @return ответ без состояния задачи
+     */
+    private fun extractTaskContextFromResponse(response: String): TaskContext? {
+        // Ищем строку с этапом в ответе
+        val progress = response.substringAfter("<task_progress>", "").substringBefore("</task_progress>", "")
+        return try {
+            Json.decodeFromString<TaskContext>(progress)
+        } catch (_: Exception) { null } ?: return null
     }
 
     fun sendMessage(content: String) {
@@ -281,7 +306,7 @@ class ChatViewModel : ViewModel() {
                     usedToken = null,
                     cost = null
                 )
-                val currentMessages = messages.value.first.addStorageData()
+                val currentMessages = messages.value.first.addSystemMetaData()
                 if (branchId != null) {
                     branchRepository.insertMessageBranch(branchId, userMessage)
                 } else {
@@ -290,6 +315,30 @@ class ChatViewModel : ViewModel() {
 
                 // Получаем ответ от LLM с учетом стратегии управления контекстом
                 val responseContent = openRouterClient.sendMessage(currentMessages + userMessage, _settings.value)
+
+                // Извлекаем этап задачи из ответа LLM
+                val taskContext = extractTaskContextFromResponse(responseContent.content)
+
+
+
+                taskContext?.let {
+                    val currentContext = taskContextState.value
+                    if (currentContext != null) {
+                        try {
+                            currentContext.checkAvailableStep(it.taskState)
+                            taskRepository.insertTask(session.id, it)
+                        } catch (e: IllegalArgumentException) {
+                            _error.value = "Ошибка перехода между состояниями: ${e.message}. Попробуйте снова"
+                            if (branchId != null) {
+                                branchRepository.removeMessages(branchId, userMessage.id)
+                            } else {
+                                messageRepository.removeMessages(listOf(userMessage.id))
+                            }
+                        }
+                    } else {
+                        taskRepository.insertTask(session.id, it)
+                    }
+                }
 
                 val cost = "%.10f".format(responseContent.cost).dropLastWhile { it == '0' }
                 val updatedSession = session.copy(totalToken = responseContent.totalUsedToken)
@@ -356,7 +405,7 @@ class ChatViewModel : ViewModel() {
             try {
                 val responseContent = openRouterClient.summarizeMessages(
                     settings.value,
-                    messages.addStorageData()
+                    messages.addSystemMetaData()
                 )
                 val cost = "%.10f".format(responseContent.cost).dropLastWhile { it == '0' }
                 val newSummary = Message(
@@ -542,8 +591,9 @@ class ChatViewModel : ViewModel() {
         }
     }
 
-    suspend fun List<Message>.addStorageData(): List<Message> {
+    suspend fun List<Message>.addSystemMetaData(): List<Message> {
         val storageContent = getStoragePrompt() ?: return this
+        val taskContent = getTasksPrompt()
 
         // Ищем существующее системное сообщение
         val existingSystemMessageIndex = indexOfFirst { it.role == MessageRole.SYSTEM }
@@ -553,6 +603,7 @@ class ChatViewModel : ViewModel() {
             val updatedList = toMutableList()
             val existingSystemMessage = updatedList[existingSystemMessageIndex]
             val updatedContent = buildString {
+                append(taskContent + "\n")
                 append(existingSystemMessage.content)
                 if (!existingSystemMessage.content.endsWith("\n") && existingSystemMessage.content.isNotEmpty()) {
                     append("\n")
@@ -565,12 +616,16 @@ class ChatViewModel : ViewModel() {
             )
             updatedList.toList()
         } else {
+            val systemContent = buildString {
+                append(taskContent + "\n")
+                append(storageContent)
+            }.trim()
             // Если системного сообщения нет, создаем новое
             val systemMessage = Message(
                 id = UUID.randomUUID().toString(),
                 sessionId = "",
                 role = MessageRole.SYSTEM,
-                content = storageContent.trim(),
+                content = systemContent,
                 timestamp = Clock.System.now(),
                 usedToken = null,
                 cost = null
@@ -579,6 +634,56 @@ class ChatViewModel : ViewModel() {
             // Добавляем системное сообщение в начало списка
             listOf(systemMessage) + this
         }
+    }
+
+    //Необходимо составить техническое задание для фичи Поиск. Задача реализуется для мобильных устройств.  Необходимо описать поведение поля текстового ввода. Что через каждые 5 сек после ввода мы идем на бекенд получаем ответ и отрисовываем контент
+    //Поле должно иметь кнопку очистки.
+    //Во время ожидания/загрузки на экране, по середине появляется лоадер.
+    //Быстрый последовательный ввод не стоит обрабатывать, так как запрос мы сделаем спустя 5 секунд, после того как пользователь закончит ввод текста.
+    //
+    //Вывод результатов происходит в виде вертикального списка. Описывать как, что и где будет расположено на UI не нужно, так как будет приложен макет.
+    //Подсказок также не будет. Сохранении истории тоже нет.
+
+    private fun getTasksPrompt(): String {
+        return """
+# Блок task_progress:
+В начале сообщения должен присутствовать json в окруженный <task_progress>...</task_progress>.
+В нем описываем состояние выполнения задачи. Данный блок должен быть **ОБЯЗАТЕЛЬНО** в единственном виде в сообщении.
+Любая задача должна быть разбита на этапы.
+
+## Структура json объекта внутри task_progress:
+**taskName** - содержит название текущего этапа выполнения задачи. Навание должно быть понятное человеку, и отражать производимую работу. Тип - Строка. Например: "Проектирование плана." или "Реализация задания."
+**taskState** - содержит текущее состояние выполнения задачи. Возможные значения: PLANING|EXECUTING|VALIDATE|DONE. Тип - Строка.
+**step** - содержит номер текущего этапа выполнения. Тип - целое число.
+**totalSteps** - содержит общее количество этапов выполнения. Тип - целое число.
+
+## Детальное описание параметра taskState
+Состояния указаны в соответствии их последовательности. Переход из одного состояния должен быть явно быть одобрен пользователем
+**PLANING(Планирование)**.
+    1. На данном этапе проектируется план выполнения. На данном этапе мы не решаем задачу.
+    2. Исключительно договариваемся о плане. Задаются дополнительные вопросы в случае их возникновения. 
+    3. Утверждение плана происходит **ИСКЛЮЧИТЕЛЬНО** после того как решены все вопросы.
+**EXECUTING(Реализация)**
+    1. На данном этапе предлагаем варианты решения задачи.
+**VALIDATE(Валидация)**
+    1. На данном этапе происходит ревью, написание тестов к коду(если был код). 
+    2. На данном этапе необходимо переспросить все ли устраивает пользователя
+**DONE(Задача выполнена)**
+
+## Возможные переходы между состояниями
+**Этапы пропускать ЗАПРЕЩЕНО**
+
+Из состояния PLANING возможен переход в EXECUTING
+Из состояния EXECUTING возможен переход в PLANING, VALIDATE
+Из состояния VALIDATE возможен переход в EXECUTING, DONE
+Состояние DONE является конечным.
+
+## Правила
+Необходимо следовать утвержденной схеме переходов между состояниями.
+Нельзя описывать несколько состояний за одно сообщение.
+Нельзя перепрыгивать несколько состояний за один раз.
+У каждого шага(параметр step) имеется свое уникальное taskName  
+        """.trimIndent()
     }
 
     private suspend fun getStoragePrompt() : String? {
@@ -693,6 +798,7 @@ class ChatViewModel : ViewModel() {
     }
 
     fun createNewUser(name: String) {
+        userProfileRepository.removeCurrent()
         userProfileRepository.saveUserProfile(
             UserProfile(
                 id = UUID.randomUUID().toString(),

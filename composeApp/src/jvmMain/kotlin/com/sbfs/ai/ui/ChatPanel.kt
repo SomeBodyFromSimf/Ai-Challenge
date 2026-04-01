@@ -1,6 +1,7 @@
 package com.sbfs.ai.ui
 
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -10,10 +11,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.sbfs.ai.Res
 import com.sbfs.ai.data.*
@@ -31,6 +34,7 @@ fun ChatPanel(
     isLoading: Boolean,
     onSendMessage: (String) -> Unit,
     onSaveFacts: (String) -> Unit,
+    taskContext: TaskContext?,
     modifier: Modifier = Modifier
 ) {
     var messageText by remember { mutableStateOf("") }
@@ -66,6 +70,16 @@ fun ChatPanel(
                 }%",
                 style = MaterialTheme.typography.headlineSmall
             )
+            if (taskContext != null) {
+                Text(
+                    modifier = Modifier.fillMaxWidth(),
+                    text = "Этап выполнения задачи: ${taskContext.taskState}(${taskContext.step}/${taskContext.totalSteps}: ${taskContext.taskName})",
+                    style = MaterialTheme.typography.bodySmall,
+                    overflow = TextOverflow.Ellipsis,
+                    maxLines = 1,
+                )
+            }
+
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -180,6 +194,7 @@ fun MessageItem(message: Message) {
     } else {
         Alignment.CenterStart
     }
+    val clipboard = LocalClipboardManager.current
     Box(
         modifier = Modifier.fillMaxWidth(),
         contentAlignment = align,
@@ -187,7 +202,10 @@ fun MessageItem(message: Message) {
         Card(
             modifier = Modifier
                 .fillMaxWidth(0.7f)
-                .border(1.dp, Color.Black),
+                .border(1.dp, Color.Black)
+                .clickable(
+                    onClick = { clipboard.setText(AnnotatedString(message.content)) }
+                ),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
         ) {
             Column(

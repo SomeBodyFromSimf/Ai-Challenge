@@ -1,0 +1,19 @@
+CREATE TABLE IF NOT EXISTS task_context (
+    sessionId TEXT NOT NULL PRIMARY KEY,
+    taskName TEXT NOT NULL,
+    taskState TEXT NOT NULL,
+    step INTEGER NOT NULL,
+    totalSteps INTEGER NOT NULL
+);
+
+getBySessionId:
+SELECT * FROM task_context WHERE sessionId = :sessionId;
+
+insert:
+INSERT OR REPLACE INTO task_context VALUES ?;
+
+deleteBySessionId:
+DELETE FROM task_context WHERE sessionId = :sessionId;
+
+deleteAll:
+DELETE FROM task_context;

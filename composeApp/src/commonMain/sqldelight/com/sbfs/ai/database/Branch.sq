@@ -38,3 +38,6 @@ SELECT * FROM message_branch WHERE branch_id = :branch_id;
 
 removeAllMessagesFromBranch:
 DELETE FROM message_branch WHERE branch_id = :branch_id;
+
+removeMessage:
+DELETE FROM message_branch WHERE branch_id = :branch_id AND message_id = :message_id;
