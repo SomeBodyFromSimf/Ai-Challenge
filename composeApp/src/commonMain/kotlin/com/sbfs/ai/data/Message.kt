@@ -12,7 +12,8 @@ data class Message(
     val content: String,
     val timestamp: Instant,
     val usedToken: Long?,
-    val cost: String?
+    val cost: String?,
+    val validationResult: ValidateInvariantsResult?
 )
 
 @Serializable

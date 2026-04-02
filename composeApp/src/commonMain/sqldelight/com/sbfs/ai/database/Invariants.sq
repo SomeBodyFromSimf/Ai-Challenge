@@ -1,0 +1,18 @@
+CREATE TABLE IF NOT EXISTS invariants (
+    session_id TEXT NOT NULL,
+    classType TEXT NOT NULL,
+    data TEXT NOT NULL,
+    PRIMARY KEY (session_id, classType)
+);
+
+getAll:
+SELECT * FROM invariants WHERE session_id = :session_id;
+
+insert:
+INSERT OR REPLACE INTO invariants VALUES ?;
+
+delete:
+DELETE FROM invariants WHERE session_id = :session_id AND classType = :classType;
+
+clear:
+DELETE FROM invariants WHERE session_id = :session_id;

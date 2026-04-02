@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS message_branch (
     content TEXT NOT NULL,
     timestamp INTEGER NOT NULL,
     usedToken INTEGER,
-    cost TEXT
+    cost TEXT,
+    validationResult TEXT
 );
 
 getAll:

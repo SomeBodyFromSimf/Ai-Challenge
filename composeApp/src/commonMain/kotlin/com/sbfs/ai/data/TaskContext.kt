@@ -26,7 +26,7 @@ private val transitions = mapOf(
 
 fun TaskContext.checkAvailableStep(state: TaskState) {
     val allowed = transitions[taskState]
-    require(state in allowed!!) {
+    require(state in allowed!! || state == taskState) {
         "Переход из $taskState -> $state запрещен!!!"
     }
 }

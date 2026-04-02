@@ -30,6 +30,7 @@ class ChatViewModel : ViewModel() {
     private val userProfileRepository = UserProfileRepository(db)
 
     private val sessionMemoryRepository = SessionMemoryRepository(db)
+    private val invariantsRepository = InvariantsRepository(db)
     private val taskRepository = TaskRepository(db)
     private val openRouterClient = OpenRouterClient()
 
@@ -87,6 +88,14 @@ class ChatViewModel : ViewModel() {
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), emptyList())
 
+    val invariants: StateFlow<List<Invariant>> = currentSessionId.flatMapLatest { sessionId ->
+        if (sessionId != null) {
+            invariantsRepository.getInvariantsBySessionId(sessionId)
+        } else {
+            flowOf(emptyList())
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), emptyList())
+
     private val currentBranchId = MutableStateFlow<String?>(null)
     val currentBranch = combine(
         currentBranchId, branches
@@ -134,7 +143,8 @@ class ChatViewModel : ViewModel() {
                                     content = "Important facts:\n$factsContent",
                                     timestamp = Clock.System.now(),
                                     usedToken = null,
-                                    cost = null
+                                    cost = null,
+                                    validationResult = null
                                 )
                             }
                     }
@@ -180,8 +190,6 @@ class ChatViewModel : ViewModel() {
                         selectSession(session)
                     }
             }
-
-
         }
     }
 
@@ -232,6 +240,8 @@ class ChatViewModel : ViewModel() {
                 paramsRepository.deleteParams(sessionId)
                 summaryRepository.deleteSummary(sessionId)
                 branchRepository.clearBranches(sessionId)
+                sessionMemoryRepository.clear(sessionId)
+                invariantsRepository.clear(sessionId)
                 if (currentSessionId.value == sessionId) {
                     currentSessionId.value = null
                 }
@@ -267,14 +277,27 @@ fun clearCurrentSession() {
 
     /**
      * Извлекает состояние задачи из ответа LLM
-     * @return ответ без состояния задачи
+     * @return состояние задачи
      */
     private fun extractTaskContextFromResponse(response: String): TaskContext? {
         // Ищем строку с этапом в ответе
         val progress = response.substringAfter("<task_progress>", "").substringBefore("</task_progress>", "")
         return try {
             Json.decodeFromString<TaskContext>(progress)
-        } catch (_: Exception) { null } ?: return null
+        } catch (_: Exception) { null }
+    }
+
+    /**
+     * Извлекает состояние задачи из ответа LLM
+     * @return ответ без состояния задачи
+     */
+    private fun validateInvariants(response: String): ValidateInvariantsResult? {
+        if (invariants.value.isEmpty()) return null
+        return invariants.value.filterNot {
+            it.check(response)
+        }.takeIf { it.isNotEmpty() }?.let {
+            ValidateInvariantsResult.Fail(it)
+        } ?: ValidateInvariantsResult.Success
     }
 
     fun sendMessage(content: String) {
@@ -304,7 +327,8 @@ fun clearCurrentSession() {
                     content = content,
                     timestamp = Clock.System.now(),
                     usedToken = null,
-                    cost = null
+                    cost = null,
+                    validationResult = null
                 )
                 val currentMessages = messages.value.first.addSystemMetaData()
                 if (branchId != null) {
@@ -319,7 +343,7 @@ fun clearCurrentSession() {
                 // Извлекаем этап задачи из ответа LLM
                 val taskContext = extractTaskContextFromResponse(responseContent.content)
 
-
+                val validationResult = validateInvariants(responseContent.content)
 
                 taskContext?.let {
                     val currentContext = taskContextState.value
@@ -353,6 +377,7 @@ fun clearCurrentSession() {
                     timestamp = Clock.System.now(),
                     usedToken = responseContent.outputUsedToken,
                     cost = cost,
+                    validationResult = validationResult
                 )
                 if (branchId != null) {
                     branchRepository.insertMessageBranch(branchId, assistantMessage)
@@ -399,7 +424,8 @@ fun clearCurrentSession() {
                 content = "Please summarize the following conversation concisely. Focus on the main points and decisions made. Use the language of correspondence",
                 timestamp = Clock.System.now(),
                 usedToken = null,
-                cost = null
+                cost = null,
+                validationResult = null
             )
             val messages = listOfNotNull(summaryMessage, summary, *messagesToSummary.toTypedArray())
             try {
@@ -416,6 +442,7 @@ fun clearCurrentSession() {
                     timestamp = Clock.System.now(),
                     usedToken = responseContent.outputUsedToken,
                     cost = cost,
+                    validationResult = null
                 )
 
                 summaryRepository.insertSummary(newSummary)
@@ -545,6 +572,40 @@ fun clearCurrentSession() {
         }
     }
 
+    /**
+     * Добавляет инвариант в рабочую память сессии
+     */
+    fun saveInvariant(invariant: Invariant) {
+        viewModelScope.launch {
+            try {
+                currentSessionId.value?.let { sessionId ->
+                    invariantsRepository.insert(sessionId, invariant)
+                } ?: run {
+                    _error.value = "Нет активной сессии для сохранения инварианта"
+                }
+            } catch (e: Exception) {
+                _error.value = "Ошибка сохранения инварианта: ${e.message}"
+            }
+        }
+    }
+
+    /**
+     * Удаляет факт из рабочей памяти сессии
+     */
+    fun removeInvariant(classType: String) {
+        viewModelScope.launch {
+            try {
+                currentSessionId.value?.let { sessionId ->
+                    invariantsRepository.delete(sessionId, classType)
+                } ?: run {
+                    _error.value = "Нет активной сессии для удаления инварианта"
+                }
+            } catch (e: Exception) {
+                _error.value = "Ошибка удаления инварианта: ${e.message}"
+            }
+        }
+    }
+
     fun saveUserProfile(profile: UserProfile) {
         viewModelScope.launch {
             try {
@@ -628,7 +689,8 @@ fun clearCurrentSession() {
                 content = systemContent,
                 timestamp = Clock.System.now(),
                 usedToken = null,
-                cost = null
+                cost = null,
+                validationResult = null
             )
 
             // Добавляем системное сообщение в начало списка
@@ -690,9 +752,10 @@ fun clearCurrentSession() {
         val sessionId = currentSessionId.value ?: return null
         val userProfile = userProfileRepository.getUserProfile().first()
         val sessionMemory = sessionMemoryRepository.getMemoryBySessionId(sessionId).first()
+        val invariants = invariantsRepository.getInvariantsBySessionId(sessionId).first()
 
         // Если нет данных для добавления, возвращаем исходный список
-        if (userProfile == null && sessionMemory.isEmpty()) {
+        if (userProfile == null && sessionMemory.isEmpty() && invariants.isEmpty()) {
             return null
         }
 
@@ -716,6 +779,13 @@ fun clearCurrentSession() {
                 sessionMemory.forEach { data ->
                     append("- ${data.data}\n")
                 }
+            }
+            if (invariants.isNotEmpty()) {
+                append("Invariants:\n")
+                invariants.forEach { invariant ->
+                    append("- ${invariant.description}\n")
+                }
+                append("НАРУШЕНИЕ ЛЮБОГО ИНВАРИАНТА ЗАПРЕЩЕНО\n")
             }
         }.takeIf { it.isNotEmpty() }
     }
@@ -759,7 +829,8 @@ fun clearCurrentSession() {
                     content = newSystemPrompt,
                     timestamp = Clock.System.now(),
                     usedToken = null,
-                    cost = null
+                    cost = null,
+                    validationResult = null
                 )
 
                 val messages = listOfNotNull(
@@ -783,6 +854,7 @@ fun clearCurrentSession() {
                         timestamp = Clock.System.now(),
                         usedToken = responseContent.outputUsedToken,
                         cost = cost,
+                        validationResult = null
                     )
                     branchRepository.deleteBranch(targetBranch.id)
                     branchRepository.removeMessages(sourceBranch.id)

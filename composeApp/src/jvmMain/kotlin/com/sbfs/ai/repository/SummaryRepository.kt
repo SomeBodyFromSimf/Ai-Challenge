@@ -29,7 +29,8 @@ class SummaryRepository(
                         content = summary.content,
                         timestamp = Instant.fromEpochMilliseconds(summary.created_at),
                         usedToken = summary.tokens,
-                        cost = null
+                        cost = null,
+                        validationResult = null
                     )
                 }
             }

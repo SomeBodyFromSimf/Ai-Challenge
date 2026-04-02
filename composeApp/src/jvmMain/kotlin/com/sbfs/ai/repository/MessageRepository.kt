@@ -5,10 +5,13 @@ import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
 import com.sbfs.ai.data.Message
 import com.sbfs.ai.data.MessageRole
+import com.sbfs.ai.data.ValidateInvariantsResult
 import com.sbfs.ai.db.AiChallengeDb
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import kotlin.time.Instant
 
 class MessageRepository(
@@ -30,6 +33,7 @@ class MessageRepository(
                         timestamp = Instant.fromEpochMilliseconds(messageEntity.timestamp),
                         usedToken = messageEntity.usedToken,
                         cost = messageEntity.cost,
+                        validationResult = messageEntity.validationResult?.let { Json.decodeFromString<ValidateInvariantsResult>(it) }
                     )
                 }
         }
@@ -45,7 +49,7 @@ class MessageRepository(
                 timestamp = message.timestamp.toEpochMilliseconds(),
                 usedToken = message.usedToken,
                 cost = message.cost,
-            )
+                validationResult = message.validationResult?.let { Json.encodeToString(it) })
         )
     }
 

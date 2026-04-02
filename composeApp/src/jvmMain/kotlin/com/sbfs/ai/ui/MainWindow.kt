@@ -1,5 +1,6 @@
 package com.sbfs.ai.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -9,6 +10,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.CreationExtras
@@ -37,6 +40,7 @@ fun MainWindow() {
     val messagesPair by viewModel.messages.collectAsState()
     val error by viewModel.error.collectAsState()
     val models by viewModel.models.collectAsState()
+    val invariants by viewModel.invariants.collectAsState()
     val taskContext by viewModel.taskContextState.collectAsState()
     val sessionParams by viewModel.sessionParams.collectAsState()
     val branches by viewModel.branches.collectAsState()
@@ -299,26 +303,29 @@ fun MainWindow() {
             // Модальное окно памяти сессии
             if (showSessionMemoryModal && selectedSession != null) {
                 val sessionMemoryData by viewModel.sessionMemory.collectAsState()
-                AlertDialog(
+                Dialog(
                     onDismissRequest = { showSessionMemoryModal = false },
-                    confirmButton = {
-                        TextButton(onClick = { showSessionMemoryModal = false }) {
-                            Text("Закрыть")
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize(),
-                    text = {
-                        Box(
+                    properties = DialogProperties(usePlatformDefaultWidth = false),
+                    content = {
+                        Column(
                             modifier = Modifier
-                                .fillMaxSize()
+                                .fillMaxWidth(0.6f)
+                                .fillMaxHeight()
                                 .padding(16.dp)
+                                .background(MaterialTheme.colorScheme.background)
                         ) {
                             SessionMemoryPanel(
                                 facts = sessionMemoryData,
+                                invariants = invariants,
+                                onAddInvariant = { invariant -> viewModel.saveInvariant(invariant) },
+                                onRemoveInvariant = { invariant -> viewModel.removeInvariant(invariant::class.simpleName!!) },
                                 onAddFact = { fact -> viewModel.saveSessionData(fact) },
                                 onRemoveFact = { fact -> viewModel.removeFact(fact) },
                                 modifier = Modifier.fillMaxSize()
                             )
+                            TextButton(onClick = { showSessionMemoryModal = false }) {
+                                Text("Закрыть")
+                            }
                         }
                     }
                 )

@@ -15,8 +15,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.sbfs.ai.Res
 import com.sbfs.ai.data.*
@@ -233,7 +236,27 @@ fun MessageItem(message: Message) {
                         )
                     }
                 }
-
+                val validationResult = message.validationResult
+                if (validationResult != null) {
+                    Text(
+                        text = buildAnnotatedString {
+                            append("Результат валидации: ")
+                            val color = if (validationResult is ValidateInvariantsResult.Success) Color.Green else Color.Red
+                            withStyle(style = SpanStyle(color = color)) {
+                                if (validationResult is ValidateInvariantsResult.Fail) {
+                                    append("Fail\n")
+                                    validationResult.variants.forEach {
+                                        append("Нарушен: $it")
+                                    }
+                                } else {
+                                    append("SUCCESS")
+                                }
+                            }
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
     }

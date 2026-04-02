@@ -6,12 +6,14 @@ import app.cash.sqldelight.coroutines.mapToOneOrNull
 import com.sbfs.ai.data.Branch
 import com.sbfs.ai.data.Message
 import com.sbfs.ai.data.MessageRole
+import com.sbfs.ai.data.ValidateInvariantsResult
 import com.sbfs.ai.database.Message_branch
 import com.sbfs.ai.db.AiChallengeDb
 import jdk.internal.joptsimple.internal.Messages.message
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.json.Json
 import kotlin.time.Instant
 
 class BranchRepository(
@@ -84,7 +86,8 @@ class BranchRepository(
                 content = message.content,
                 timestamp = message.timestamp.toEpochMilliseconds(),
                 usedToken = message.usedToken,
-                cost = message.cost
+                cost = message.cost,
+                validationResult = message.validationResult?.let { Json.encodeToString(it) }
             )
         )
     }
@@ -103,6 +106,7 @@ class BranchRepository(
                         timestamp = Instant.fromEpochMilliseconds(entity.timestamp),
                         usedToken = entity.usedToken,
                         cost = entity.cost,
+                        validationResult = entity.validationResult?.let { Json.decodeFromString<ValidateInvariantsResult>(it) }
                     )
                 }
             }
