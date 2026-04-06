@@ -9,7 +9,8 @@ material3 = "1.10.0-alpha05"
 sqlDelight = "2.3.2"
 serialization = "1.10.0"
 ktor = "3.0.1"
-datetime = "0.6.0"
+mcpVersion = "0.11.0"
+slf4j = "2.0.17"
 
 
 [libraries]
@@ -32,6 +33,9 @@ ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }
 ktor-content-negotiation = { module = "io.ktor:ktor-client-content-negotiation", version.ref = "ktor" }
 ktor-serialization = { module = "io.ktor:ktor-serialization-kotlinx-json", version.ref = "ktor" }
 ktor-logging = { module = "io.ktor:ktor-client-logging", version.ref = "ktor" }
+
+mcp-sdk = { module = "io.modelcontextprotocol:kotlin-sdk", version.ref = "mcpVersion" }
+slf4j-nop = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
 
 
 [plugins]
