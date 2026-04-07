@@ -40,6 +40,7 @@ fun MainWindow() {
     val messagesPair by viewModel.messages.collectAsState()
     val error by viewModel.error.collectAsState()
     val models by viewModel.models.collectAsState()
+    val mcpServers by viewModel.mcpServers.collectAsState()
     val invariants by viewModel.invariants.collectAsState()
     val taskContext by viewModel.taskContextState.collectAsState()
     val sessionParams by viewModel.sessionParams.collectAsState()
@@ -91,7 +92,9 @@ fun MainWindow() {
                 SettingsPanel(
                     settings = settings,
                     availableModels = models,
+                    mcpServers = mcpServers,
                     onSettingsChange = { newSettings -> viewModel.updateSettings(newSettings) },
+                    toggleMcpServer = { name, isEnabled -> viewModel.toggleMcpServer(name, isEnabled) },
                     modifier = Modifier
                         .weight(0.7f)
                         .fillMaxHeight()

@@ -7,7 +7,7 @@ import com.sbfs.ai.data.SessionSettings
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.engine.cio.*
-import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.plugins.logging.*
 import io.ktor.client.request.*
@@ -19,9 +19,13 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import kotlin.collections.ifEmpty
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlin.collections.plus
 
-class OpenRouterClient {
+class OpenRouterClient(
+    private val mcpManager: McpManager
+) {
     private val client = HttpClient(CIO) {
         install(ContentNegotiation) {
             json(Json {
@@ -38,14 +42,14 @@ class OpenRouterClient {
             socketTimeoutMillis = 600000
         }
     }
-    
+
     companion object {
         private const val OPENROUTER_API_KEY = ""
         private const val OPENROUTER_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions"
         private const val OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
     }
     
-    suspend fun sendMessage(messages: List<Message>, settings: SessionSettings): SendMessageData {
+    suspend fun sendMessage(messages: List<Message>, settings: SessionSettings, tools: List<JsonObject>): SendMessageData {
         return withContext(Dispatchers.IO) {
             try {
                 val request = OpenRouterRequest(
@@ -67,7 +71,8 @@ class OpenRouterClient {
                             role = message.role,
                             content = message.content
                         )
-                    }
+                    },
+                    tools = tools,
                 )
                 
                 val response: HttpResponse = client.post(OPENROUTER_COMPLETIONS_URL) {
@@ -78,9 +83,10 @@ class OpenRouterClient {
                 
                 if (response.status == HttpStatusCode.OK) {
                     val responseBody = response.body<OpenRouterResponse>()
-
+                    val contentBuilder = StringBuilder()
+                    contentBuilder.manageWithToolMessages(request, responseBody)
                     SendMessageData(
-                        content = responseBody.choices.firstOrNull()?.message?.content ?: "Empty response",
+                        content = contentBuilder.toString(),
                         inputUsedToken = responseBody.usage.promptTokens,
                         outputUsedToken = responseBody.usage.completionTokens,
                         totalUsedToken = responseBody.usage.totalTokens,
@@ -214,6 +220,52 @@ class OpenRouterClient {
             }
         }
     }
+
+
+    private suspend fun StringBuilder.manageWithToolMessages(request: OpenRouterRequest, responseBody: OpenRouterResponse) {
+        val choice = responseBody.choices.firstOrNull()
+        append(choice?.message?.content ?: "Empty response")
+        val toolCalls = choice?.message?.toolCalls
+        val toolMessages = toolCalls?.map { toolCall ->
+            append("\n")
+            append("-".repeat(20))
+            append("Вызов тулзы ${toolCall.function.name}\n")
+            val toolText = mcpManager.callMcpServer(
+                toolCall.function.name,
+                Json.decodeFromString<Map<String, JsonElement>>(toolCall.function.arguments)
+            )
+            append("Ответ от MCP сервера:\n")
+            append(toolText)
+            append("\n" + "-".repeat(20) + "\n")
+            MessageData(
+                role = MessageRole.TOOL,
+                content = toolText,
+                toolCallId = toolCall.id
+            )
+        }
+
+        if (choice?.reason == "tool_calls" && toolMessages?.isNotEmpty() == true) {
+            val newRequest = request.copy(
+                messages = request.messages + MessageData(
+                    role = MessageRole.ASSISTANT,
+                    content = choice.message.content,
+                    toolCalls = choice.message.toolCalls
+                ) + toolMessages
+            )
+            val toolResponse: HttpResponse = client.post(OPENROUTER_COMPLETIONS_URL) {
+                contentType(ContentType.Application.Json)
+                header("Authorization", "Bearer $OPENROUTER_API_KEY")
+                setBody(newRequest)
+            }
+            if (toolResponse.status == HttpStatusCode.OK) {
+                val responseBody = toolResponse.body<OpenRouterResponse>()
+                manageWithToolMessages(newRequest, responseBody)
+            } else {
+                throw Exception("Error ${toolResponse.status}: ${toolResponse.bodyAsText()}")
+            }
+        }
+    }
+    
 }
 
 @Serializable
@@ -237,13 +289,18 @@ data class OpenRouterRequest(
     val stop: List<String>?,
     val responseFormat: String?,
     val messages: List<MessageData>,
+    val tools: List<JsonObject> = emptyList(),
     val stream: Boolean = false
 )
 
 @Serializable
 data class MessageData(
     val role: MessageRole,
-    val content: String
+    val content: String?,
+    @SerialName("tool_call_id")
+    val toolCallId: String? = null,
+    @SerialName("tool_calls")
+    val toolCalls: List<ResponseToolCall>? = null,
 )
 
 @Serializable
@@ -270,12 +327,28 @@ data class ResponseUsage(
 
 @Serializable
 data class ResponseChoice(
-    val message: ResponseChoiceMessage
+    val message: ResponseChoiceMessage,
+    @SerialName("finish_reason")
+    val reason: String? = null,
+)
+
+@Serializable
+data class ResponseToolCall(
+    val id: String,
+    val function: ResponseToolCallFun
+)
+
+@Serializable
+data class ResponseToolCallFun(
+    val name: String,
+    val arguments: String,
 )
 
 @Serializable
 data class ResponseChoiceMessage(
-    val content: String
+    val content: String? = null,
+    @SerialName("tool_calls")
+    val toolCalls: List<ResponseToolCall>? = null,
 )
 
 

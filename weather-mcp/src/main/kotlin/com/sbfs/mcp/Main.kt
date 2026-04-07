@@ -2,29 +2,29 @@ package com.sbfs.mcp
 
 
 import com.sbfs.mcp.client.WeatherClient
+import io.ktor.server.application.*
+import io.ktor.server.engine.*
+import io.ktor.server.netty.*
+import io.ktor.server.plugins.calllogging.*
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.server.ServerOptions
-import io.modelcontextprotocol.kotlin.sdk.server.StdioServerTransport
+import io.modelcontextprotocol.kotlin.sdk.server.mcpStreamableHttp
 import io.modelcontextprotocol.kotlin.sdk.types.*
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.runBlocking
-import kotlinx.io.asSink
-import kotlinx.io.asSource
-import kotlinx.io.buffered
 import kotlinx.serialization.json.*
+import org.slf4j.event.Level
 
-fun main() {
+fun main(args: Array<String>) {
+    val port = args.firstOrNull()?.toIntOrNull() ?: 3000
     val server: Server = createServer()
-    val stdioServerTransport = StdioServerTransport(
-        System.`in`.asSource().buffered(),
-        System.out.asSink().buffered()
-    )
-    runBlocking {
-        val job = Job()
-        server.onClose { job.complete() }
-        server.createSession(stdioServerTransport)
-        job.join()
-    }
+    embeddedServer(Netty, host = "127.0.0.1", port = port) {
+
+        install(CallLogging) {
+            level = Level.INFO
+        }
+        mcpStreamableHttp {
+            server
+        }
+    }.start(wait = true)
 }
 
 

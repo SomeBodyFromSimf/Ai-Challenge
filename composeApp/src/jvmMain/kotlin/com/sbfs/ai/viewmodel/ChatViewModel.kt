@@ -2,6 +2,7 @@ package com.sbfs.ai.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.sbfs.ai.McpManager
 import com.sbfs.ai.OpenRouterClient
 import com.sbfs.ai.data.*
 import com.sbfs.ai.db.AiChallengeDb
@@ -32,7 +33,10 @@ class ChatViewModel : ViewModel() {
     private val sessionMemoryRepository = SessionMemoryRepository(db)
     private val invariantsRepository = InvariantsRepository(db)
     private val taskRepository = TaskRepository(db)
-    private val openRouterClient = OpenRouterClient()
+    private val mcpConfigRepository = McpConfigRepository()
+
+    private val mcpManager = McpManager()
+    private val openRouterClient = OpenRouterClient(mcpManager)
 
 
     // Профиль пользователя
@@ -179,6 +183,10 @@ class ChatViewModel : ViewModel() {
 
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
+    
+    // Состояние MCP серверов
+    private val _mcpServers = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+    val mcpServers: StateFlow<Map<String, Boolean>> = _mcpServers.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -189,6 +197,21 @@ class ChatViewModel : ViewModel() {
                     ?.let { session ->
                         selectSession(session)
                     }
+            }
+        }
+        // Загружаем конфигурацию MCP серверов
+        loadMcpServers()
+    }
+    
+    private fun loadMcpServers() {
+        viewModelScope.launch {
+            try {
+                val config = mcpConfigRepository.getConfig()
+                mcpManager.startServers(config.mcpServers)
+                val servers = config.mcpServers.associateWith { true } // По умолчанию все серверы включены
+                _mcpServers.value = servers.mapKeys { it.key.name }
+            } catch (e: Exception) {
+                _error.value = "Ошибка загрузки конфигурации MCP серверов: ${e.message}"
             }
         }
     }
@@ -338,7 +361,11 @@ fun clearCurrentSession() {
                 }
 
                 // Получаем ответ от LLM с учетом стратегии управления контекстом
-                val responseContent = openRouterClient.sendMessage(currentMessages + userMessage, _settings.value)
+                val responseContent = openRouterClient.sendMessage(
+                    currentMessages + userMessage,
+                    _settings.value,
+                    mcpManager.getTools()
+                )
 
                 // Извлекаем этап задачи из ответа LLM
                 val taskContext = extractTaskContextFromResponse(responseContent.content)
@@ -734,6 +761,7 @@ fun clearCurrentSession() {
 
 ## Возможные переходы между состояниями
 **Этапы пропускать ЗАПРЕЩЕНО**
+**В одном сообщении должен быть не более ОДНОГО этапа**
 
 Из состояния PLANING возможен переход в EXECUTING
 Из состояния EXECUTING возможен переход в PLANING, VALIDATE
@@ -883,4 +911,23 @@ fun clearCurrentSession() {
         userProfileRepository.removeCurrent()
         userProfileRepository.saveUserProfile(profile.copy(isCurrent = true))
     }
+    
+    /**
+     * Переключает состояние MCP сервера (включен/выключен)
+     */
+    fun toggleMcpServer(name: String, isEnabled: Boolean) {
+        viewModelScope.launch {
+            if (isEnabled) {
+                val config = mcpConfigRepository.getConfig().mcpServers.find { it.name == name } ?: return@launch
+                mcpManager.addServer(config)
+            } else {
+                mcpManager.removeServer(name)
+
+            }
+            val currentServers = _mcpServers.value.toMutableMap()
+            currentServers[name] = isEnabled
+            _mcpServers.value = currentServers
+        }
+    }
+
 }

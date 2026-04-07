@@ -23,5 +23,7 @@ enum class MessageRole {
     @SerialName("user")
     USER,
     @SerialName("assistant")
-    ASSISTANT
+    ASSISTANT,
+    @SerialName("tool")
+    TOOL
 }

@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.material3.ExposedDropdownMenuAnchorType.Companion.PrimaryNotEditable
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.sbfs.ai.data.Model
@@ -14,7 +15,9 @@ import com.sbfs.ai.data.SessionSettings
 fun SettingsPanel(
     availableModels: List<Model>,
     settings: SessionSettings,
+    mcpServers: Map<String, Boolean>,
     onSettingsChange: (SessionSettings) -> Unit,
+    toggleMcpServer: (String, Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(modifier = modifier) {
@@ -178,6 +181,46 @@ fun SettingsPanel(
                 label = { Text("Max Tokens") },
                 modifier = Modifier.fillMaxWidth()
             )
+
+            var connectorsExpanded by remember { mutableStateOf(false) }
+
+            ExposedDropdownMenuBox(
+                expanded = connectorsExpanded,
+                onExpandedChange = { connectorsExpanded = !connectorsExpanded }
+            ) {
+                Button(
+                    onClick = {
+                        connectorsExpanded = !connectorsExpanded
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Connectors")
+                }
+                ExposedDropdownMenu(
+                    expanded = connectorsExpanded,
+                    onDismissRequest = { connectorsExpanded = false }
+                ) {
+                    Text("MCP Серверы")
+                    if (mcpServers.isEmpty()) {
+                        Text(
+                            text = "Нет настроенных MCP серверов",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        mcpServers.forEach { (name, isEnabled) ->
+                            McpServerItem(
+                                name = name,
+                                isEnabled = isEnabled,
+                                onToggle = { enabled ->
+                                    toggleMcpServer(name, enabled)
+                                },
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -202,6 +245,31 @@ fun SliderWithLabel(
             value = value,
             onValueChange = onValueChange,
             valueRange = valueRange
+        )
+    }
+}
+
+@Composable
+fun McpServerItem(
+    name: String,
+    isEnabled: Boolean,
+    onToggle: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .padding(16.dp)
+            .fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = name,
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.weight(1f)
+        )
+
+        Switch(
+            checked = isEnabled,
+            onCheckedChange = onToggle
         )
     }
 }
