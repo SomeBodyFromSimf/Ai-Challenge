@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sbfs.ai.McpManager
 import com.sbfs.ai.OpenRouterClient
+import com.sbfs.ai.SchedulerManager
 import com.sbfs.ai.data.*
 import com.sbfs.ai.db.AiChallengeDb
 import com.sbfs.ai.db.DatabaseDriverFactory
@@ -12,6 +13,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonPrimitive
 import java.util.*
 import kotlin.time.Clock
 
@@ -37,6 +39,41 @@ class ChatViewModel : ViewModel() {
 
     private val mcpManager = McpManager()
     private val openRouterClient = OpenRouterClient(mcpManager)
+    private val schedulerManager = SchedulerManager(
+        mcpManager = mcpManager,
+        scope = viewModelScope,
+        onResult = { sessionId, toolName, result, settings ->
+            val message = try {
+                val messageData = openRouterClient.sendSystemMessage(
+                    "Преобразуй результат выполнения к человекочитаемому формату.\n" +
+                    "Tool: $toolName\nРезультат: $result",
+                    settings
+                )
+                Message(
+                    id = UUID.randomUUID().toString(),
+                    sessionId = sessionId,
+                    role = MessageRole.ASSISTANT,
+                    content = messageData.content,
+                    timestamp = Clock.System.now(),
+                    usedToken = messageData.outputUsedToken,
+                    cost = messageData.cost.toCostString(),
+                    validationResult = null
+                )
+            } catch (_: Exception) {
+                Message(
+                    id = UUID.randomUUID().toString(),
+                    sessionId = sessionId,
+                    role = MessageRole.ASSISTANT,
+                    content = result,
+                    timestamp = Clock.System.now(),
+                    usedToken = null,
+                    cost = null,
+                    validationResult = null
+                )
+            }
+            messageRepository.addMessage(message)
+        }
+    )
 
 
     // Профиль пользователя
@@ -364,7 +401,19 @@ fun clearCurrentSession() {
                 val responseContent = openRouterClient.sendMessage(
                     currentMessages + userMessage,
                     _settings.value,
-                    mcpManager.getTools()
+                    mcpManager.getTools(),
+                    virtualToolHandler = { name, args ->
+                        when (name) {
+                            "schedule" -> schedulerManager.handleScheduleCall(args, session.id, _settings.value)
+                            "cancel_job" -> {
+                                val jobId = args["job_id"]?.jsonPrimitive?.content
+                                if (jobId == null) "Error: job_id is required"
+                                else if (schedulerManager.cancelJob(jobId)) "Job $jobId cancelled successfully."
+                                else "Job $jobId not found."
+                            }
+                            else -> null
+                        }
+                    }
                 )
 
                 // Извлекаем этап задачи из ответа LLM
@@ -376,7 +425,7 @@ fun clearCurrentSession() {
                     val currentContext = taskContextState.value
                     if (currentContext != null) {
                         try {
-                            currentContext.checkAvailableStep(it.taskState)
+                            //currentContext.checkAvailableStep(it.taskState)
                             taskRepository.insertTask(session.id, it)
                         } catch (e: IllegalArgumentException) {
                             _error.value = "Ошибка перехода между состояниями: ${e.message}. Попробуйте снова"
@@ -391,7 +440,7 @@ fun clearCurrentSession() {
                     }
                 }
 
-                val cost = "%.10f".format(responseContent.cost).dropLastWhile { it == '0' }
+                val cost = responseContent.cost.toCostString()
                 val updatedSession = session.copy(totalToken = responseContent.totalUsedToken)
                 sessionRepository.updateSession(updatedSession)
 
@@ -460,7 +509,7 @@ fun clearCurrentSession() {
                     settings.value,
                     messages.addSystemMetaData()
                 )
-                val cost = "%.10f".format(responseContent.cost).dropLastWhile { it == '0' }
+                val cost = responseContent.cost.toCostString()
                 val newSummary = Message(
                     id = UUID.randomUUID().toString(),
                     sessionId = session.id,
@@ -681,7 +730,7 @@ fun clearCurrentSession() {
 
     suspend fun List<Message>.addSystemMetaData(): List<Message> {
         val storageContent = getStoragePrompt() ?: return this
-        val taskContent = getTasksPrompt()
+        //val taskContent = getTasksPrompt()
 
         // Ищем существующее системное сообщение
         val existingSystemMessageIndex = indexOfFirst { it.role == MessageRole.SYSTEM }
@@ -691,7 +740,7 @@ fun clearCurrentSession() {
             val updatedList = toMutableList()
             val existingSystemMessage = updatedList[existingSystemMessageIndex]
             val updatedContent = buildString {
-                append(taskContent + "\n")
+                //append(taskContent + "\n")
                 append(existingSystemMessage.content)
                 if (!existingSystemMessage.content.endsWith("\n") && existingSystemMessage.content.isNotEmpty()) {
                     append("\n")
@@ -705,7 +754,7 @@ fun clearCurrentSession() {
             updatedList.toList()
         } else {
             val systemContent = buildString {
-                append(taskContent + "\n")
+                //append(taskContent + "\n")
                 append(storageContent)
             }.trim()
             // Если системного сообщения нет, создаем новое
@@ -724,14 +773,6 @@ fun clearCurrentSession() {
             listOf(systemMessage) + this
         }
     }
-
-    //Необходимо составить техническое задание для фичи Поиск. Задача реализуется для мобильных устройств.  Необходимо описать поведение поля текстового ввода. Что через каждые 5 сек после ввода мы идем на бекенд получаем ответ и отрисовываем контент
-    //Поле должно иметь кнопку очистки.
-    //Во время ожидания/загрузки на экране, по середине появляется лоадер.
-    //Быстрый последовательный ввод не стоит обрабатывать, так как запрос мы сделаем спустя 5 секунд, после того как пользователь закончит ввод текста.
-    //
-    //Вывод результатов происходит в виде вертикального списка. Описывать как, что и где будет расположено на UI не нужно, так как будет приложен макет.
-    //Подсказок также не будет. Сохранении истории тоже нет.
 
     private fun getTasksPrompt(): String {
         return """
@@ -873,7 +914,7 @@ fun clearCurrentSession() {
                         settings.value,
                         messages
                     )
-                    val cost = "%.10f".format(responseContent.cost).dropLastWhile { it == '0' }
+                    val cost = responseContent.cost.toCostString()
                     val newSummary = Message(
                         id = UUID.randomUUID().toString(),
                         sessionId = sourceBranch.sessionId,
@@ -928,6 +969,14 @@ fun clearCurrentSession() {
             currentServers[name] = isEnabled
             _mcpServers.value = currentServers
         }
+    }
+
+    private fun Double.toCostString(): String {
+        return when(this) {
+            0.0 -> "0"
+            else -> "%.10f".format(this).dropLastWhile { it == '0' }
+        }
+
     }
 
 }

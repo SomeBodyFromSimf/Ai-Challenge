@@ -12,6 +12,7 @@ import io.modelcontextprotocol.kotlin.sdk.server.mcpStreamableHttp
 import io.modelcontextprotocol.kotlin.sdk.types.*
 import kotlinx.serialization.json.*
 import org.slf4j.event.Level
+import kotlin.random.Random
 
 fun main(args: Array<String>) {
     val port = args.firstOrNull()?.toIntOrNull() ?: 3000
@@ -88,6 +89,41 @@ fun createServer(): Server {
 
         val forecast = weatherClient.getForecast(latitude, longitude)
         CallToolResult(content = forecast.map { TextContent(it) })
+    }
+
+    server.addTool(
+        name = "call_taxi",
+        description = "Order a taxi to the specified address. Returns estimated arrival time.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                putJsonObject("address") {
+                    put("type", "string")
+                    put("description", "Pickup address")
+                }
+            },
+            required = listOf("address"),
+        ),
+    ) { _ ->
+        val minutes = Random.nextInt(5, 16)
+        CallToolResult(content = listOf(TextContent("The car will arrive in $minutes minutes.")))
+    }
+
+    server.addTool(
+        name = "get_connection_quality",
+        description = "Returns server current internet connection quality metrics.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {},
+            required = emptyList(),
+        ),
+    ) { _ ->
+        val speed = Random.nextInt(60, 201)
+        val latency = Random.nextInt(5, 50)
+        val packetLoss = if (Random.nextInt(10) == 0) Random.nextInt(1, 5) else 0
+        CallToolResult(
+            content = listOf(
+                TextContent("Internet quality: $speed Mbps, ${latency} ms delay, ${packetLoss}% packet loss")
+            )
+        )
     }
 
     return server

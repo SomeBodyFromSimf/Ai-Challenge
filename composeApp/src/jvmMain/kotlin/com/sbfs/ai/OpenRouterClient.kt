@@ -49,7 +49,12 @@ class OpenRouterClient(
         private const val OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
     }
     
-    suspend fun sendMessage(messages: List<Message>, settings: SessionSettings, tools: List<JsonObject>): SendMessageData {
+    suspend fun sendMessage(
+        messages: List<Message>,
+        settings: SessionSettings,
+        tools: List<JsonObject>,
+        virtualToolHandler: (suspend (name: String, args: Map<String, JsonElement>) -> String?)? = null
+    ): SendMessageData {
         return withContext(Dispatchers.IO) {
             try {
                 val request = OpenRouterRequest(
@@ -74,17 +79,17 @@ class OpenRouterClient(
                     },
                     tools = tools,
                 )
-                
+
                 val response: HttpResponse = client.post(OPENROUTER_COMPLETIONS_URL) {
                     contentType(ContentType.Application.Json)
                     header("Authorization", "Bearer $OPENROUTER_API_KEY")
                     setBody(request)
                 }
-                
+
                 if (response.status == HttpStatusCode.OK) {
                     val responseBody = response.body<OpenRouterResponse>()
                     val contentBuilder = StringBuilder()
-                    contentBuilder.manageWithToolMessages(request, responseBody)
+                    contentBuilder.manageWithToolMessages(request, responseBody, virtualToolHandler)
                     SendMessageData(
                         content = contentBuilder.toString(),
                         inputUsedToken = responseBody.usage.promptTokens,
@@ -222,29 +227,25 @@ class OpenRouterClient(
     }
 
 
-    private suspend fun StringBuilder.manageWithToolMessages(request: OpenRouterRequest, responseBody: OpenRouterResponse) {
+    private suspend fun StringBuilder.manageWithToolMessages(
+        request: OpenRouterRequest,
+        responseBody: OpenRouterResponse,
+        virtualToolHandler: (suspend (name: String, args: Map<String, JsonElement>) -> String?)? = null
+    ) {
         val choice = responseBody.choices.firstOrNull()
-        append(choice?.message?.content ?: "Empty response")
         val toolCalls = choice?.message?.toolCalls
-        val toolMessages = toolCalls?.map { toolCall ->
-            append("\n")
-            append("-".repeat(20))
-            append("Вызов тулзы ${toolCall.function.name}\n")
-            val toolText = mcpManager.callMcpServer(
-                toolCall.function.name,
-                Json.decodeFromString<Map<String, JsonElement>>(toolCall.function.arguments)
-            )
-            append("Ответ от MCP сервера:\n")
-            append(toolText)
-            append("\n" + "-".repeat(20) + "\n")
-            MessageData(
-                role = MessageRole.TOOL,
-                content = toolText,
-                toolCallId = toolCall.id
-            )
-        }
 
-        if (choice?.reason == "tool_calls" && toolMessages?.isNotEmpty() == true) {
+        if (choice?.reason == "tool_calls" && toolCalls?.isNotEmpty() == true) {
+            val toolMessages = toolCalls.map { toolCall ->
+                val parsedArgs = Json.decodeFromString<Map<String, JsonElement>>(toolCall.function.arguments)
+                val toolText = virtualToolHandler?.invoke(toolCall.function.name, parsedArgs)
+                    ?: mcpManager.callMcpServer(toolCall.function.name, parsedArgs)
+                MessageData(
+                    role = MessageRole.TOOL,
+                    content = toolText,
+                    toolCallId = toolCall.id
+                )
+            }
             val newRequest = request.copy(
                 messages = request.messages + MessageData(
                     role = MessageRole.ASSISTANT,
@@ -258,11 +259,13 @@ class OpenRouterClient(
                 setBody(newRequest)
             }
             if (toolResponse.status == HttpStatusCode.OK) {
-                val responseBody = toolResponse.body<OpenRouterResponse>()
-                manageWithToolMessages(newRequest, responseBody)
+                manageWithToolMessages(newRequest, toolResponse.body(), virtualToolHandler)
             } else {
                 throw Exception("Error ${toolResponse.status}: ${toolResponse.bodyAsText()}")
             }
+        } else {
+            // Final response — only this goes into the chat message
+            append(choice?.message?.content ?: "")
         }
     }
     
