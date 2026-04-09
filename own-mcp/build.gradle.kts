@@ -7,7 +7,6 @@ plugins {
 group = "com.sbfs.mcp"
 version = "1.0"
 
-
 application {
     mainClass.set("com.sbfs.mcp.MainKt")
 }
@@ -26,7 +25,7 @@ dependencies {
 
 tasks.jar {
     manifest.attributes["Main-Class"] = "com.sbfs.mcp.MainKt"
-    archiveFileName = "WeatherMcp.jar"
+    archiveFileName = "OwnMcp.jar"
     from(sourceSets.main.get().output)
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     dependsOn(configurations.runtimeClasspath)

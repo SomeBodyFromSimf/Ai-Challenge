@@ -33,4 +33,4 @@ plugins {
 }
 
 include(":composeApp")
-include("weather-mcp")
+include("own-mcp")
