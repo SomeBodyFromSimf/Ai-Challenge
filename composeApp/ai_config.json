@@ -3,6 +3,10 @@
     {
       "name": "own",
       "url": "http://localhost:3000/mcp"
+    },
+    {
+      "name": "messenger",
+      "url": "http://localhost:4000/mcp"
     }
   ]
 }

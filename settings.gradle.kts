@@ -34,3 +34,4 @@ plugins {
 
 include(":composeApp")
 include("own-mcp")
+include("messenger-mcp")
