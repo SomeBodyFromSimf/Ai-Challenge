@@ -182,6 +182,20 @@ fun SettingsPanel(
                 modifier = Modifier.fillMaxWidth()
             )
 
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("RAG-режим")
+                Switch(
+                    checked = settings.ragMode,
+                    onCheckedChange = { onSettingsChange(settings.copy(ragMode = it)) }
+                )
+            }
+
             var connectorsExpanded by remember { mutableStateOf(false) }
 
             ExposedDropdownMenuBox(

@@ -8,6 +8,8 @@ import com.sbfs.ai.SchedulerManager
 import com.sbfs.ai.data.*
 import com.sbfs.ai.db.AiChallengeDb
 import com.sbfs.ai.db.DatabaseDriverFactory
+import com.sbfs.ai.document.DocumentIndexer
+import com.sbfs.ai.document.IndexingEvent
 import com.sbfs.ai.repository.*
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
@@ -35,7 +37,11 @@ class ChatViewModel : ViewModel() {
     private val sessionMemoryRepository = SessionMemoryRepository(db)
     private val invariantsRepository = InvariantsRepository(db)
     private val taskRepository = TaskRepository(db)
-    private val mcpConfigRepository = McpConfigRepository()
+    private val configRepository = ConfigRepository()
+
+    private val documentRepository = DocumentRepository(db)
+    private val documentIndexer = DocumentIndexer(documentRepository, configRepository)
+    private var ragRetriever: com.sbfs.ai.document.RagRetriever? = null
 
     private val mcpManager = McpManager()
     private val openRouterClient = OpenRouterClient(mcpManager)
@@ -225,6 +231,26 @@ class ChatViewModel : ViewModel() {
     private val _mcpServers = MutableStateFlow<Map<String, Boolean>>(emptyMap())
     val mcpServers: StateFlow<Map<String, Boolean>> = _mcpServers.asStateFlow()
 
+    val indexingStatus: StateFlow<String> = flow {
+        var list = mutableListOf<String>()
+        documentIndexer.indexingEventFlow.collect {
+            when (it) {
+                is IndexingEvent.FileStarted -> {
+                    list.add(it.filename)
+                }
+                is IndexingEvent.FileFinished -> {
+                    list.remove(it.filename)
+                }
+            }
+            val str = when (list.size) {
+                0 -> ""
+                1 -> "Индексируется ${list.first()}"
+                else -> "Индексация ${list.size} файлов"
+            }
+            emit(str)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), "")
+
     init {
         viewModelScope.launch {
             userProfile.filterNotNull().collect {
@@ -238,12 +264,26 @@ class ChatViewModel : ViewModel() {
         }
         // Загружаем конфигурацию MCP серверов
         loadMcpServers()
+        // Индексируем документы из папки documents/
+        syncDocuments()
     }
     
+    private fun syncDocuments() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val result = documentIndexer.syncDocumentsFolder()
+            if (!result.folderNotFound) {
+                println(
+                    "[RAG] Синхронизация: проиндексировано=${result.indexed}, " +
+                    "пропущено=${result.skipped}, ошибок=${result.failed}, удалено=${result.removed}"
+                )
+            }
+        }
+    }
+
     private fun loadMcpServers() {
         viewModelScope.launch {
             try {
-                val config = mcpConfigRepository.getConfig()
+                val config = configRepository.getConfig()
                 mcpManager.startServers(config.mcpServers)
                 val servers = config.mcpServers.associateWith { true } // По умолчанию все серверы включены
                 _mcpServers.value = servers.mapKeys { it.key.name }
@@ -390,7 +430,7 @@ fun clearCurrentSession() {
                     cost = null,
                     validationResult = null
                 )
-                val currentMessages = messages.value.first.addSystemMetaData()
+                val currentMessages = messages.value.first.addSystemMetaData(query = content)
                 if (branchId != null) {
                     branchRepository.insertMessageBranch(branchId, userMessage)
                 } else {
@@ -728,9 +768,12 @@ fun clearCurrentSession() {
         }
     }
 
-    suspend fun List<Message>.addSystemMetaData(): List<Message> {
-        val storageContent = getStoragePrompt() ?: return this
-        //val taskContent = getTasksPrompt()
+    suspend fun List<Message>.addSystemMetaData(query: String? = null): List<Message> {
+        val ragContext = if (_settings.value.ragMode && query != null) buildRagContext(query) else null
+        val storageContent = getStoragePrompt()
+
+        val combined = listOfNotNull(storageContent, ragContext).joinToString("\n")
+        if (combined.isBlank()) return this
 
         // Ищем существующее системное сообщение
         val existingSystemMessageIndex = indexOfFirst { it.role == MessageRole.SYSTEM }
@@ -740,36 +783,27 @@ fun clearCurrentSession() {
             val updatedList = toMutableList()
             val existingSystemMessage = updatedList[existingSystemMessageIndex]
             val updatedContent = buildString {
-                //append(taskContent + "\n")
                 append(existingSystemMessage.content)
                 if (!existingSystemMessage.content.endsWith("\n") && existingSystemMessage.content.isNotEmpty()) {
                     append("\n")
                 }
-                append(storageContent)
+                append(combined)
             }
-
             updatedList[existingSystemMessageIndex] = existingSystemMessage.copy(
                 content = updatedContent.trim()
             )
             updatedList.toList()
         } else {
-            val systemContent = buildString {
-                //append(taskContent + "\n")
-                append(storageContent)
-            }.trim()
-            // Если системного сообщения нет, создаем новое
             val systemMessage = Message(
                 id = UUID.randomUUID().toString(),
                 sessionId = "",
                 role = MessageRole.SYSTEM,
-                content = systemContent,
+                content = combined.trim(),
                 timestamp = Clock.System.now(),
                 usedToken = null,
                 cost = null,
                 validationResult = null
             )
-
-            // Добавляем системное сообщение в начало списка
             listOf(systemMessage) + this
         }
     }
@@ -817,19 +851,47 @@ fun clearCurrentSession() {
         """.trimIndent()
     }
 
+    private suspend fun getRagRetriever(): com.sbfs.ai.document.RagRetriever {
+        return ragRetriever ?: run {
+            val ragConfig = configRepository.getConfig().rag
+            com.sbfs.ai.document.RagRetriever(documentRepository, ragConfig).also { ragRetriever = it }
+        }
+    }
+
+    private suspend fun buildRagContext(query: String): String? {
+        val chunks = getRagRetriever().retrieve(query, topK = 5)
+        if (chunks.isEmpty()) return null
+        return buildString {
+            append("## База знаний (релевантные фрагменты)\n\n")
+            chunks.forEachIndexed { i, chunk ->
+                append("### Фрагмент ${i + 1}\n")
+                append(chunk.content.trim())
+                append("\n\n")
+            }
+        }
+    }
+
     private suspend fun getStoragePrompt() : String? {
         val sessionId = currentSessionId.value ?: return null
         val userProfile = userProfileRepository.getUserProfile().first()
         val sessionMemory = sessionMemoryRepository.getMemoryBySessionId(sessionId).first()
         val invariants = invariantsRepository.getInvariantsBySessionId(sessionId).first()
+        val ragMode = _settings.value.ragMode
 
-        // Если нет данных для добавления, возвращаем исходный список
-        if (userProfile == null && sessionMemory.isEmpty() && invariants.isEmpty()) {
+        // Если нет данных для добавления, возвращаем null
+        if (userProfile == null && sessionMemory.isEmpty() && invariants.isEmpty() && !ragMode) {
             return null
         }
 
         // Создаем контент для системного сообщения
         return buildString {
+            if (ragMode) {
+                append(
+                    "Отвечай ИСКЛЮЧИТЕЛЬНО на основе предоставленных знаний и документов из базы знаний. " +
+                    "Не используй информацию, которой нет в предоставленном контексте. " +
+                    "Если ответа нет в предоставленных данных, явно сообщи об этом пользователю.\n"
+                )
+            }
             userProfile?.let { p ->
                 append("Профиль пользователя:\n")
                 p.preferences.toList().joinToString { "${it.first}: ${it.second}" }
@@ -959,7 +1021,7 @@ fun clearCurrentSession() {
     fun toggleMcpServer(name: String, isEnabled: Boolean) {
         viewModelScope.launch {
             if (isEnabled) {
-                val config = mcpConfigRepository.getConfig().mcpServers.find { it.name == name } ?: return@launch
+                val config = configRepository.getConfig().mcpServers.find { it.name == name } ?: return@launch
                 mcpManager.addServer(config)
             } else {
                 mcpManager.removeServer(name)

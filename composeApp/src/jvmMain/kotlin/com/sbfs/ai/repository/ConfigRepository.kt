@@ -6,7 +6,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.io.File
 
-class McpConfigRepository {
+class ConfigRepository {
     private val configFile: File
         get() = File(File(System.getProperty("user.dir")), "ai_config.json")
     private val json = Json { ignoreUnknownKeys = true }

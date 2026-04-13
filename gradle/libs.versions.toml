@@ -11,6 +11,8 @@ serialization = "1.10.0"
 ktor = "3.0.1"
 mcpVersion = "0.11.0"
 slf4j = "2.0.17"
+pdfbox = "2.0.32"
+poi = "5.4.0"
 
 
 [libraries]
@@ -37,6 +39,8 @@ ktor-logging = { module = "io.ktor:ktor-client-logging", version.ref = "ktor" }
 ktor-server-call-logging = { module = "io.ktor:ktor-server-call-logging", version.ref = "ktor" }
 
 mcp-sdk = { module = "io.modelcontextprotocol:kotlin-sdk", version.ref = "mcpVersion" }
+pdfbox = { module = "org.apache.pdfbox:pdfbox", version.ref = "pdfbox" }
+poi-scratchpad = { module = "org.apache.poi:poi-scratchpad", version.ref = "poi" }
 slf4j-nop = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
 
 

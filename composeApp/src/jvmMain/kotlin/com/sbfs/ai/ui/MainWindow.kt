@@ -9,6 +9,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -47,6 +48,7 @@ fun MainWindow() {
     val branches by viewModel.branches.collectAsState()
     val currentBranch by viewModel.currentBranch.collectAsState()
     val userProfile by viewModel.userProfile.collectAsState()
+    val indexingStatus by viewModel.indexingStatus.collectAsState()
 
     val (messages, isLoading) = messagesPair
 
@@ -155,11 +157,29 @@ fun MainWindow() {
                         )
                     }
                 }
-
-                // Правая панель - управление контекстом и памятью
-
             }
-
+            if (indexingStatus.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = indexingStatus,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Black,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    LinearProgressIndicator(
+                        modifier = Modifier.width(70.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
+            }
             // Отображение ошибок
             error?.let { errorMessage ->
                 Snackbar(

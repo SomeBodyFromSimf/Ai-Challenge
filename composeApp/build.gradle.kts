@@ -37,6 +37,8 @@ kotlin {
             implementation(libs.kotlinx.coroutinesSwing)
             implementation(libs.sqlDelight.jvm.driver)
             implementation(libs.mcp.sdk)
+            implementation(libs.pdfbox)
+            implementation(libs.poi.scratchpad)
         }
     }
 }

@@ -27,5 +27,6 @@ data class SessionSettings(
     val maxTokens: Int? = null,
     val seed: Int? = null,
     val stop: List<String> = emptyList(),
-    val responseFormat: String? = null
+    val responseFormat: String? = null,
+    val ragMode: Boolean = false,
 )
