@@ -10,4 +10,8 @@ data class UserProfile(
     val preferences: Map<String, String> = emptyMap(), // Предпочтения пользователя
     val limitationsForLLM: List<String> = emptyList(), // Ограничения это делать нельзя
     val additionalInfo: String? = null, // Доп инфа
-)
+) {
+    fun isDefault(): Boolean {
+        return preferences.isEmpty() && limitationsForLLM.isEmpty() && additionalInfo == null
+    }
+}

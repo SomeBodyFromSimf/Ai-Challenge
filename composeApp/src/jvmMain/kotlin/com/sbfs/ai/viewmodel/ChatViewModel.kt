@@ -879,7 +879,7 @@ fun clearCurrentSession() {
         val ragMode = _settings.value.ragMode
 
         // Если нет данных для добавления, возвращаем null
-        if (userProfile == null && sessionMemory.isEmpty() && invariants.isEmpty() && !ragMode) {
+        if ((userProfile == null || userProfile.isDefault()) && sessionMemory.isEmpty() && invariants.isEmpty() && !ragMode) {
             return null
         }
 
