@@ -21,6 +21,14 @@ data class RagConfig(
     val chunkOverlap: Int = 300,
     val ollamaUrl: String = "http://localhost:11434",
     val embeddingModel: String = "nomic-embed-text",
+    /** Минимальный cosine similarity чанка к запросу; чанки ниже порога отсекаются. */
+    val minScore: Float = 0.25f,
+    /** Коэффициент MMR: 1.0 = только релевантность, 0.0 = только разнообразие. */
+    val mmrLambda: Float = 0.7f,
+    /** Бюджет токенов для RAG-контекста в промпте. */
+    val tokenBudget: Int = 3000,
+    /** topK * candidateMultiplier = размер пула перед MMR. */
+    val candidateMultiplier: Int = 3,
 )
 
 @Serializable

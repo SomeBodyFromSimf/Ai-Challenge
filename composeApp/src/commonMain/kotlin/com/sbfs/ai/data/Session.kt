@@ -29,4 +29,5 @@ data class SessionSettings(
     val stop: List<String> = emptyList(),
     val responseFormat: String? = null,
     val ragMode: Boolean = false,
+    val enhancedRag: Boolean = false,
 )

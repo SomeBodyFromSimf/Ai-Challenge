@@ -196,6 +196,24 @@ fun SettingsPanel(
                 )
             }
 
+            if (settings.ragMode) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Улучшенный RAG",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Switch(
+                        checked = settings.enhancedRag,
+                        onCheckedChange = { onSettingsChange(settings.copy(enhancedRag = it)) }
+                    )
+                }
+            }
+
             var connectorsExpanded by remember { mutableStateOf(false) }
 
             ExposedDropdownMenuBox(

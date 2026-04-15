@@ -859,14 +859,38 @@ fun clearCurrentSession() {
     }
 
     private suspend fun buildRagContext(query: String): String? {
-        val chunks = getRagRetriever().retrieve(query, topK = 5)
-        if (chunks.isEmpty()) return null
+        val ragConfig = configRepository.getConfig().rag
+        val enhanced = _settings.value.enhancedRag && _settings.value.enhancedRag
+
+        // В простом режиме фиксируем topK=5; в улучшенном — из token budget
+        val topK = if (enhanced) (ragConfig.tokenBudget / 400).coerceIn(3, 15) else 5
+        val scored = getRagRetriever().retrieve(query, topK = topK, useEnhanced = enhanced)
+        if (scored.isEmpty()) return null
+
+        // Token budget: набираем чанки пока не исчерпан бюджет
+        val selected = mutableListOf<com.sbfs.ai.document.ScoredChunk>()
+        var usedTokens = 0
+        for (sc in scored) {
+            if (usedTokens + sc.chunk.tokenCount > ragConfig.tokenBudget) break
+            selected.add(sc)
+            usedTokens += sc.chunk.tokenCount
+        }
+        if (selected.isEmpty()) return null
+
+        // Группируем чанки по документу и сортируем внутри по позиции — лучше когерентность
+        val grouped = selected.groupBy { it.chunk.documentId }
+
         return buildString {
             append("## База знаний (релевантные фрагменты)\n\n")
-            chunks.forEachIndexed { i, chunk ->
-                append("### Фрагмент ${i + 1}\n")
-                append(chunk.content.trim())
-                append("\n\n")
+            var i = 1
+            grouped.values.forEach { chunks ->
+                chunks.sortedBy { it.chunk.chunkIndex }.forEach { sc ->
+                    val scoreStr = "%.2f".format(sc.score)
+                    append("### Фрагмент $i [релевантность: $scoreStr]\n")
+                    append(sc.chunk.content.trim())
+                    append("\n\n")
+                    i++
+                }
             }
         }
     }
