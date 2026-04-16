@@ -4,6 +4,7 @@ data class DocumentIndex(
     val id: String,
     val path: String,
     val filename: String,
+    val title: String,
     val lastModified: Long,
     val fileSize: Long,
     val indexedAt: Long,

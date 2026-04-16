@@ -112,21 +112,28 @@ class DocumentIndexer(
 
     private suspend fun indexFile(file: File, ragConfig: RagConfig, ollama: OllamaClient): Boolean {
         val docId = UUID.randomUUID().toString()
-        documentRepository.insertDocument(
-            DocumentIndex(
-                id           = docId,
-                path         = file.absolutePath,
-                filename     = file.name,
-                lastModified = file.lastModified(),
-                fileSize     = file.length(),
-                indexedAt    = System.currentTimeMillis(),
-                chunkCount   = 0,
-                status       = DocumentStatus.PENDING,
-            )
-        )
 
         return try {
             val text = TextExtractor.extract(file)
+
+            // Генерируем заголовок через LLM; если не получилось — используем имя файла без расширения
+            val title = ollama.generateTitle(text, ragConfig.titleModel)
+                ?: file.nameWithoutExtension
+
+            documentRepository.insertDocument(
+                DocumentIndex(
+                    id           = docId,
+                    path         = file.absolutePath,
+                    filename     = file.name,
+                    title        = title,
+                    lastModified = file.lastModified(),
+                    fileSize     = file.length(),
+                    indexedAt    = System.currentTimeMillis(),
+                    chunkCount   = 0,
+                    status       = DocumentStatus.PENDING,
+                )
+            )
+
             val chunks = ChunkingService.chunk(text, ragConfig)
             var embeddingsMissing = false
 
@@ -150,11 +157,10 @@ class DocumentIndexer(
             val finalStatus = if (embeddingsMissing) DocumentStatus.INDEXED_NO_EMBEDDINGS
                               else                   DocumentStatus.INDEXED
             documentRepository.updateDocumentStatus(docId, finalStatus, chunks.size)
-            println("[DocumentIndexer] ${file.name} → ${chunks.size} чанков, статус=$finalStatus")
+            println("[DocumentIndexer] ${file.name} → «$title», ${chunks.size} чанков, статус=$finalStatus")
             true
         } catch (e: Exception) {
             println("[DocumentIndexer] Ошибка индексации ${file.name}: ${e.message}")
-            documentRepository.updateDocumentStatus(docId, DocumentStatus.FAILED, 0)
             false
         }
     }

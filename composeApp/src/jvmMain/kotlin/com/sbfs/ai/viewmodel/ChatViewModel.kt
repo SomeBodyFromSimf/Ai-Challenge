@@ -879,14 +879,18 @@ fun clearCurrentSession() {
 
         // Группируем чанки по документу и сортируем внутри по позиции — лучше когерентность
         val grouped = selected.groupBy { it.chunk.documentId }
+        val docMap  = documentRepository.getAllDocuments().associateBy { it.id }
 
         return buildString {
             append("## База знаний (релевантные фрагменты)\n\n")
             var i = 1
             grouped.values.forEach { chunks ->
+                val doc = docMap[chunks.first().chunk.documentId]
+                val sourceName = doc?.let { it.title.ifBlank { it.filename } }
+                    ?: "Неизвестный источник"
                 chunks.sortedBy { it.chunk.chunkIndex }.forEach { sc ->
                     val scoreStr = "%.2f".format(sc.score)
-                    append("### Фрагмент $i [релевантность: $scoreStr]\n")
+                    append("### Фрагмент $i [источник: «$sourceName», релевантность: $scoreStr]\n")
                     append(sc.chunk.content.trim())
                     append("\n\n")
                     i++
@@ -911,12 +915,15 @@ fun clearCurrentSession() {
         return buildString {
             if (ragMode) {
                 append(
-                    "Отвечай ИСКЛЮЧИТЕЛЬНО на основе предоставленных знаний и документов из базы знаний. " +
+                    "Отвечай ИСКЛЮЧИТЕЛЬНО на основе предоставленных фрагментов из базы знаний. " +
                     "Не используй информацию, которой нет в предоставленном контексте. " +
-                    "Если ответа нет в предоставленных данных, явно сообщи об этом пользователю.\n"
+                    "При ответе ОБЯЗАТЕЛЬНО указывай источник цитатой в формате: " +
+                    "[источник: «<название>»] — используй точное значение поля «источник» из заголовка фрагмента. " +
+                    "Если данные из базы знаний недостаточно релевантны для ответа на вопрос или ты не уверен в их применимости — " +
+                    "ответь именно так: «Не знаю, сформулируйте вопрос иначе».\n"
                 )
             }
-            userProfile?.let { p ->
+            userProfile?.takeIf { it.isDefault().not() }?.let { p ->
                 append("Профиль пользователя:\n")
                 p.preferences.toList().joinToString { "${it.first}: ${it.second}" }
                     .takeIf { it.isNotEmpty() }
@@ -926,7 +933,7 @@ fun clearCurrentSession() {
                     ?.let { append("Нельзя ни в коем случае делать: $it\n") }
                 p.additionalInfo
                     ?.takeIf { it.isNotEmpty() }
-                    ?.let { append("До информация: $it\n") }
+                    ?.let { append("Дополнительная информация: $it\n") }
             }
 
             if (sessionMemory.isNotEmpty()) {

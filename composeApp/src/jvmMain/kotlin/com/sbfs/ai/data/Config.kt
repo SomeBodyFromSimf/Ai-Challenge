@@ -29,6 +29,8 @@ data class RagConfig(
     val tokenBudget: Int = 3000,
     /** topK * candidateMultiplier = размер пула перед MMR. */
     val candidateMultiplier: Int = 3,
+    /** Модель Ollama для генерации заголовка документа. Пустая строка — заголовок из имени файла. */
+    val titleModel: String = "llama3.2",
 )
 
 @Serializable

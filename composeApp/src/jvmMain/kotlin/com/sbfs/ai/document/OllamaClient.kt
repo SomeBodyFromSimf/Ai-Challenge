@@ -21,9 +21,6 @@ class OllamaClient(
     private val json = Json { ignoreUnknownKeys = true }
 
     private val client = HttpClient(CIO) {
-//        install(ContentNegotiation) {
-//            json(Json { ignoreUnknownKeys = true })
-//        }
         install(HttpTimeout) {
             requestTimeoutMillis = 30_000
             connectTimeoutMillis = 5_000
@@ -46,6 +43,34 @@ class OllamaClient(
         null
     }
 
+    /**
+     * Генерирует короткий заголовок для документа на основе [text] (первые ~1000 символов).
+     * Использует [model] (не embedding-модель, а генеративную).
+     * Возвращает null, если Ollama недоступна или [model] пустой.
+     */
+    suspend fun generateTitle(text: String, model: String): String? {
+        if (model.isBlank()) return null
+        val snippet = text.take(1000).trim()
+        return try {
+            val response = client.post("$baseUrl/api/generate") {
+                contentType(ContentType.Application.Json)
+                setBody(json.encodeToString(GenerateRequest(
+                    model  = model,
+                    system = "Придумай короткое название документа (3–8 слов) на основе его содержимого. " +
+                             "Отвечай ТОЛЬКО названием, без кавычек и лишних слов.",
+                    prompt = snippet,
+                    stream = false,
+                )))
+            }.bodyAsText(Charsets.UTF_8)
+            json.decodeFromString<GenerateResponse>(response).response
+                .trim()
+                .takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            println("[OllamaClient] generateTitle failed (${e::class.simpleName}: ${e.message})")
+            null
+        }
+    }
+
     fun close() = client.close()
 
     // ── Serialization models ───────────────────────────────────────────────────
@@ -59,6 +84,19 @@ class OllamaClient(
     @Serializable
     private data class EmbeddingResponse(
         val embedding: List<Float>,
+    )
+
+    @Serializable
+    private data class GenerateRequest(
+        val model: String,
+        val system: String,
+        val prompt: String,
+        val stream: Boolean,
+    )
+
+    @Serializable
+    private data class GenerateResponse(
+        val response: String,
     )
 }
 

@@ -2,6 +2,7 @@ CREATE TABLE IF NOT EXISTS document_index (
     id           TEXT    NOT NULL PRIMARY KEY,
     path         TEXT    NOT NULL UNIQUE,
     filename     TEXT    NOT NULL,
+    title        TEXT    NOT NULL,
     lastModified INTEGER NOT NULL,
     fileSize     INTEGER NOT NULL,
     indexedAt    INTEGER NOT NULL,
