@@ -42,6 +42,7 @@ class ChatViewModel : ViewModel() {
     private val documentRepository = DocumentRepository(db)
     private val documentIndexer = DocumentIndexer(documentRepository, configRepository)
     private var ragRetriever: com.sbfs.ai.document.RagRetriever? = null
+    private val ragQueryMemories = mutableMapOf<String, com.sbfs.ai.document.RagQueryMemory>()
 
     private val mcpManager = McpManager()
     private val openRouterClient = OpenRouterClient(mcpManager)
@@ -430,12 +431,12 @@ fun clearCurrentSession() {
                     cost = null,
                     validationResult = null
                 )
-                val currentMessages = messages.value.first.addSystemMetaData(query = content)
                 if (branchId != null) {
                     branchRepository.insertMessageBranch(branchId, userMessage)
                 } else {
                     messageRepository.addMessage(userMessage)
                 }
+                val currentMessages = messages.value.first.addSystemMetaData(query = content)
 
                 // Получаем ответ от LLM с учетом стратегии управления контекстом
                 val responseContent = openRouterClient.sendMessage(
@@ -483,6 +484,11 @@ fun clearCurrentSession() {
                 val cost = responseContent.cost.toCostString()
                 val updatedSession = session.copy(totalToken = responseContent.totalUsedToken)
                 sessionRepository.updateSession(updatedSession)
+
+                // Сохраняем ответ LLM в RAG-память треда текущей сессии
+                session.id.let { sid ->
+                    ragQueryMemories[sid]?.updateLastResponse(responseContent.content)
+                }
 
                 // Создаем и сохраняем сообщение ассистента
                 val assistantMessage = Message(
@@ -860,11 +866,30 @@ fun clearCurrentSession() {
 
     private suspend fun buildRagContext(query: String): String? {
         val ragConfig = configRepository.getConfig().rag
-        val enhanced = _settings.value.enhancedRag && _settings.value.enhancedRag
-
-        // В простом режиме фиксируем topK=5; в улучшенном — из token budget
+        val enhanced = _settings.value.enhancedRag
         val topK = if (enhanced) (ragConfig.tokenBudget / 400).coerceIn(3, 15) else 5
-        val scored = getRagRetriever().retrieve(query, topK = topK, useEnhanced = enhanced)
+        val retriever = getRagRetriever()
+
+        // Эмбеддинг текущего запроса — нужен для сравнения с историей
+        val queryEmbedding = retriever.embedQuery(query)
+
+        val sessionId = currentSessionId.value
+        val memory = if (sessionId != null) ragQueryMemories.getOrPut(sessionId) {
+            com.sbfs.ai.document.RagQueryMemory(ragConfig.queryMemoryLimit)
+        } else null
+
+        // Определяем эффективный поисковый запрос через LLM-синтез
+        val (effectiveQuery, effectiveEmbedding) = resolveEffectiveQuery(
+            query, queryEmbedding, memory, ragConfig.queryMemoryThreshold, retriever
+        )
+
+        val scored = retriever.retrieve(
+            query = effectiveQuery,
+            topK = topK,
+            useEnhanced = enhanced,
+            queryEmbedding = effectiveEmbedding,
+        )
+
         if (scored.isEmpty()) return null
 
         // Token budget: набираем чанки пока не исчерпан бюджет
@@ -876,6 +901,9 @@ fun clearCurrentSession() {
             usedTokens += sc.chunk.tokenCount
         }
         if (selected.isEmpty()) return null
+
+        // Запоминаем текущий запрос в тред сессии (эмбеддинг нужен для будущих сравнений)
+        if (queryEmbedding != null && memory != null) memory.addToThread(query, queryEmbedding)
 
         // Группируем чанки по документу и сортируем внутри по позиции — лучше когерентность
         val grouped = selected.groupBy { it.chunk.documentId }
@@ -895,6 +923,61 @@ fun clearCurrentSession() {
                     append("\n\n")
                     i++
                 }
+            }
+        }
+    }
+
+    /**
+     * Определяет эффективный поисковый запрос с учётом истории треда сессии.
+     *
+     * Алгоритм:
+     * 1. Если история пуста или Ollama недоступна → используем запрос as-is.
+     * 2. Если есть похожие записи (cosine >= threshold) → спрашиваем LLM.
+     *    - REFINE: синтезированный запрос + тред сохраняется
+     *    - NEGATE: скорректированный запрос + тред сбрасывается
+     *    - NEW или null (ошибка LLM): текущий запрос + тред сбрасывается
+     * 3. Если нет похожих → новая тема, тред сбрасывается.
+     *
+     * Возвращает пару (effectiveQuery, effectiveEmbedding).
+     * effectiveEmbedding == null означает «пересчитай эмбеддинг в retrieve».
+     */
+    private suspend fun resolveEffectiveQuery(
+        query: String,
+        queryEmbedding: FloatArray?,
+        memory: com.sbfs.ai.document.RagQueryMemory?,
+        threshold: Float,
+        retriever: com.sbfs.ai.document.RagRetriever,
+    ): Pair<String, FloatArray?> {
+        if (memory == null || !memory.hasHistory() || queryEmbedding == null) {
+            return query to queryEmbedding
+        }
+
+        val related = memory.findRelated(queryEmbedding, threshold)
+        if (related.isEmpty()) {
+            memory.clearThread()
+            return query to queryEmbedding
+        }
+
+        val history = memory.getThreadHistory()
+        val synthesis = retriever.synthesizeRagQuery(query, history)
+
+        return when (synthesis?.type) {
+            com.sbfs.ai.document.SynthesisType.REFINE -> {
+                val refined = synthesis.query?.takeIf { it.isNotBlank() } ?: query
+                println("[RAG] REFINE → \"$refined\"")
+                refined to null  // эмбеддинг пересчитается в retrieve
+            }
+            com.sbfs.ai.document.SynthesisType.NEGATE -> {
+                val corrected = synthesis.query?.takeIf { it.isNotBlank() } ?: query
+                println("[RAG] NEGATE → \"$corrected\"")
+                memory.clearThread()
+                corrected to null
+            }
+            else -> {
+                // NEW или ошибка парсинга — начинаем с чистого листа
+                println("[RAG] NEW topic")
+                memory.clearThread()
+                query to queryEmbedding
             }
         }
     }

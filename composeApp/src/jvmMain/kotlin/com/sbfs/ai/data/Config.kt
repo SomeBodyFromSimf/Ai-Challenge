@@ -31,6 +31,10 @@ data class RagConfig(
     val candidateMultiplier: Int = 3,
     /** Модель Ollama для генерации заголовка документа. Пустая строка — заголовок из имени файла. */
     val titleModel: String = "llama3.2",
+    /** Порог cosine similarity для связывания нового вопроса с историей сессии. */
+    val queryMemoryThreshold: Float = 0.5f,
+    /** Максимальное число запросов в памяти сессии. */
+    val queryMemoryLimit: Int = 20,
 )
 
 @Serializable

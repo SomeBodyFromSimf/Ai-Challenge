@@ -1,18 +1,26 @@
 package com.sbfs.ai.document
 
 import io.ktor.client.*
-import io.ktor.client.call.*
 import io.ktor.client.engine.cio.*
 import io.ktor.client.plugins.*
-import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
-import io.ktor.client.statement.bodyAsText
+import io.ktor.client.statement.*
 import io.ktor.http.*
-import io.ktor.serialization.kotlinx.json.*
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.nio.ByteBuffer
+
+enum class SynthesisType { REFINE, NEGATE, NEW }
+
+/**
+ * Результат синтеза запроса LLM.
+ * [query] заполнен для REFINE и NEGATE — это итоговый поисковый запрос.
+ */
+data class SynthesisResult(val type: SynthesisType, val query: String? = null)
+
+private const val MAX_RESPONSE_PREVIEW = 400
 
 class OllamaClient(
     private val baseUrl: String,
@@ -67,6 +75,71 @@ class OllamaClient(
                 .takeIf { it.isNotBlank() }
         } catch (e: Exception) {
             println("[OllamaClient] generateTitle failed (${e::class.simpleName}: ${e.message})")
+            null
+        }
+    }
+
+    /**
+     * Анализирует связь [current] с историей запросов [history] через локальную LLM.
+     *
+     * Возвращает:
+     * - REFINE + query — уточнение/развитие темы, синтезированный поисковый запрос
+     * - NEGATE + query — пользователь отверг направление, скорректированный запрос
+     * - NEW — новая тема, история игнорируется
+     *
+     * Возвращает null если [model] пуст или Ollama недоступна.
+     */
+    /**
+     * [history] — список пар (вопрос пользователя, ответ LLM или null если ещё не получен).
+     * Ответы LLM обрезаются до [MAX_RESPONSE_PREVIEW] символов, чтобы не раздувать промпт.
+     */
+    suspend fun synthesizeRagQuery(
+        current: String,
+        history: List<Pair<String, String?>>,
+        model: String,
+    ): SynthesisResult? {
+        if (model.isBlank()) return null
+        val historyText = history.mapIndexed { i, (q, a) ->
+            val answerLine = if (a != null) "\n   Ответ: \"${a.take(MAX_RESPONSE_PREVIEW)}\"" else ""
+            "${i + 1}. Вопрос: \"$q\"$answerLine"
+        }.joinToString("\n")
+        val prompt = buildString {
+            append("История диалога по теме:\n$historyText\n\n")
+            append("Новый вопрос: \"$current\"\n\n")
+            append("Ответь СТРОГО одной строкой JSON (без markdown, без пояснений):\n")
+            append("{\"type\":\"refine\",\"query\":\"...\"} — уточнение/развитие темы\n")
+            append("{\"type\":\"negate\",\"query\":\"...\"} — пользователь отверг направление, скорректируй запрос\n")
+            append("{\"type\":\"new\"} — совершенно новая тема")
+        }
+        return try {
+            val response = client.post("$baseUrl/api/generate") {
+                contentType(ContentType.Application.Json)
+                setBody(json.encodeToString(GenerateRequest(
+                    model  = model,
+                    system = "Ты анализируешь связь между новым вопросом и историей вопросов. Отвечай ТОЛЬКО JSON.",
+                    prompt = prompt,
+                    stream = false,
+                )))
+            }.bodyAsText(Charsets.UTF_8)
+            val raw = json.decodeFromString<GenerateResponse>(response).response.trim()
+            parseSynthesisResult(raw)
+        } catch (e: Exception) {
+            println("[OllamaClient] synthesizeRagQuery failed: ${e.message}")
+            null
+        }
+    }
+
+    private fun parseSynthesisResult(text: String): SynthesisResult? {
+        val jsonStr = Regex("""\{[^{}]*\}""").find(text)?.value ?: return null
+        return try {
+            val obj = Json.parseToJsonElement(jsonStr).jsonObject
+            when (obj["type"]?.jsonPrimitive?.content) {
+                "refine" -> SynthesisResult(SynthesisType.REFINE, obj["query"]?.jsonPrimitive?.content)
+                "negate" -> SynthesisResult(SynthesisType.NEGATE, obj["query"]?.jsonPrimitive?.content)
+                "new"    -> SynthesisResult(SynthesisType.NEW)
+                else     -> null
+            }
+        } catch (e: Exception) {
             null
         }
     }

@@ -21,8 +21,20 @@ class RagRetriever(
 ) {
     private val ollamaClient = OllamaClient(ragConfig.ollamaUrl, ragConfig.embeddingModel)
 
+    /** Возвращает эмбеддинг текста как FloatArray, или null если Ollama недоступна. */
+    suspend fun embedQuery(text: String): FloatArray? = ollamaClient.embed(text)?.toFloatArray()
+
+    /**
+     * Делегирует синтез запроса к OllamaClient.synthesizeRagQuery.
+     * Использует titleModel из конфига как генеративную модель.
+     */
+    suspend fun synthesizeRagQuery(current: String, history: List<Pair<String, String?>>): SynthesisResult? =
+        ollamaClient.synthesizeRagQuery(current, history, ragConfig.titleModel)
+
     /**
      * Возвращает наиболее релевантные чанки для [query].
+     *
+     * [queryEmbedding] — предвычисленный эмбеддинг запроса (экономит вызов к Ollama).
      *
      * При [useEnhanced] = false: чистый cosine similarity, topK без фильтрации.
      *
@@ -33,14 +45,20 @@ class RagRetriever(
      * 4. Фильтр по minScore (по cosine similarity)
      * 5. MMR — диверсификация результатов
      */
-    suspend fun retrieve(query: String, topK: Int = 5, useEnhanced: Boolean = true): List<ScoredChunk> {
+    suspend fun retrieve(
+        query: String,
+        topK: Int = 5,
+        useEnhanced: Boolean = true,
+        queryEmbedding: FloatArray? = null,
+    ): List<ScoredChunk> {
         val allChunks = documentRepository.getAllChunks()
         if (allChunks.isEmpty()) return emptyList()
 
+        val effectiveVec: FloatArray? = queryEmbedding ?: ollamaClient.embed(query)?.toFloatArray()
+
         // ── Простой режим: только cosine similarity ────────────────────────────
         if (!useEnhanced) {
-            val queryEmbedding = ollamaClient.embed(query) ?: return emptyList()
-            val queryVec = queryEmbedding.toFloatArray()
+            val queryVec = effectiveVec ?: return emptyList()
             return allChunks
                 .filter { it.embedding != null }
                 .map { chunk -> ScoredChunk(chunk, cosineSimilarity(queryVec, chunk.embedding!!.toFloatArray())) }
@@ -56,10 +74,9 @@ class RagRetriever(
         val bm25Scores = FloatArray(allChunks.size) { i -> bm25.score(queryTokens, i) }
 
         // ── Embedding cosine similarity ────────────────────────────────────────
-        val queryEmbedding = ollamaClient.embed(query)
         val embScores = FloatArray(allChunks.size) { i ->
-            if (queryEmbedding != null && allChunks[i].embedding != null)
-                cosineSimilarity(queryEmbedding.toFloatArray(), allChunks[i].embedding!!.toFloatArray())
+            if (effectiveVec != null && allChunks[i].embedding != null)
+                cosineSimilarity(effectiveVec, allChunks[i].embedding!!.toFloatArray())
             else 0f
         }
 
@@ -82,7 +99,7 @@ class RagRetriever(
             .sortedByDescending { rrfScores[it] }
             .take(candidates)
 
-        val filtered = if (queryEmbedding != null) {
+        val filtered = if (effectiveVec != null) {
             topByRrf.filter { embScores[it] >= ragConfig.minScore }
         } else {
             topByRrf
