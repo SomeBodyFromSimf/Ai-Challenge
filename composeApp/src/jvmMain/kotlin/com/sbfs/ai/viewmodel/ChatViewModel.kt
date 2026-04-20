@@ -150,14 +150,20 @@ class ChatViewModel : ViewModel() {
     ) { id, b ->
         b.find { it.id == id }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), null)
-    val models = flow {
-        val offlineModels = modelRepository.getModels()
-        if (offlineModels.isNotEmpty()) {
-            emit(offlineModels)
-        } else {
-            emit(openRouterClient.getAvailableModels())
-        }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), emptyList())
+    private val _localModels = MutableStateFlow<List<Model>>(emptyList())
+
+    val models = combine(
+        flow {
+            val offlineModels = modelRepository.getModels()
+            if (offlineModels.isNotEmpty()) {
+                emit(offlineModels)
+            } else {
+                emit(openRouterClient.getAvailableModels())
+            }
+        },
+        _localModels
+    ) { remote, local -> local + remote }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), emptyList())
 
     val sessionParams = currentSessionId.flatMapLatest { sessionId ->
         if (sessionId != null) {
@@ -286,11 +292,22 @@ class ChatViewModel : ViewModel() {
             try {
                 val config = configRepository.getConfig()
                 mcpManager.startServers(config.mcpServers)
-                val servers = config.mcpServers.associateWith { true } // По умолчанию все серверы включены
+                val servers = config.mcpServers.associateWith { true }
                 _mcpServers.value = servers.mapKeys { it.key.name }
+                loadLocalModels(config.localLlms)
             } catch (e: Exception) {
                 _error.value = "Ошибка загрузки конфигурации MCP серверов: ${e.message}"
             }
+        }
+    }
+
+    private fun loadLocalModels(configs: List<LocalLlmConfig>) {
+        if (configs.isEmpty()) return
+        viewModelScope.launch {
+            val models = configs.flatMap { config ->
+                openRouterClient.fetchLocalModels(config)
+            }
+            _localModels.value = models
         }
     }
 

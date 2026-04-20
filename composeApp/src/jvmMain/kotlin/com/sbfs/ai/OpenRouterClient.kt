@@ -1,5 +1,6 @@
 package com.sbfs.ai
 
+import com.sbfs.ai.data.LocalLlmConfig
 import com.sbfs.ai.data.Message
 import com.sbfs.ai.data.MessageRole
 import com.sbfs.ai.data.Model
@@ -48,6 +49,45 @@ class OpenRouterClient(
         private const val OPENROUTER_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions"
         private const val OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
     }
+
+    suspend fun fetchLocalModels(config: LocalLlmConfig): List<Model> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val url = "${config.url.trimEnd('/')}/v1/models"
+                val response: HttpResponse = client.get(url) {
+                    contentType(ContentType.Application.Json)
+                }
+                if (response.status == HttpStatusCode.OK) {
+                    val body = response.body<LocalModelsResponse>()
+                    body.data.map { dto ->
+                        Model(
+                            id = dto.id,
+                            name = "Local(${config.name}-${dto.id}",
+                            contextLength = dto.contextLength ?: 0,
+                            isLocal = true,
+                            baseUrl = config.url,
+                        )
+                    }
+                } else {
+                    emptyList()
+                }
+            } catch (_: Exception) {
+                emptyList()
+            }
+        }
+    }
+
+    private fun completionUrl(model: Model?): String =
+        if (model?.isLocal == true && model.baseUrl != null)
+            "${model.baseUrl.trimEnd('/')}/v1/chat/completions"
+        else
+            OPENROUTER_COMPLETIONS_URL
+
+    private fun HttpRequestBuilder.applyAuth(model: Model?) {
+        if (model?.isLocal != true) {
+            header("Authorization", "Bearer $OPENROUTER_API_KEY")
+        }
+    }
     
     suspend fun sendMessage(
         messages: List<Message>,
@@ -80,16 +120,17 @@ class OpenRouterClient(
                     tools = tools,
                 )
 
-                val response: HttpResponse = client.post(OPENROUTER_COMPLETIONS_URL) {
+                val model = settings.model
+                val response: HttpResponse = client.post(completionUrl(model)) {
                     contentType(ContentType.Application.Json)
-                    header("Authorization", "Bearer $OPENROUTER_API_KEY")
+                    applyAuth(model)
                     setBody(request)
                 }
 
                 if (response.status == HttpStatusCode.OK) {
                     val responseBody = response.body<OpenRouterResponse>()
                     val contentBuilder = StringBuilder()
-                    contentBuilder.manageWithToolMessages(request, responseBody, virtualToolHandler)
+                    contentBuilder.manageWithToolMessages(request, responseBody, model, virtualToolHandler)
                     SendMessageData(
                         content = contentBuilder.toString(),
                         inputUsedToken = responseBody.usage.promptTokens,
@@ -151,9 +192,10 @@ class OpenRouterClient(
                     responseFormat = null,
                 )
 
-                val response: HttpResponse = client.post(OPENROUTER_COMPLETIONS_URL) {
+                val model = settings.model
+                val response: HttpResponse = client.post(completionUrl(model)) {
                     contentType(ContentType.Application.Json)
-                    header("Authorization", "Bearer $OPENROUTER_API_KEY")
+                    applyAuth(model)
                     setBody(request)
                 }
 
@@ -201,9 +243,10 @@ class OpenRouterClient(
                     responseFormat = null,
                 )
 
-                val response: HttpResponse = client.post(OPENROUTER_COMPLETIONS_URL) {
+                val model = settings.model
+                val response: HttpResponse = client.post(completionUrl(model)) {
                     contentType(ContentType.Application.Json)
-                    header("Authorization", "Bearer $OPENROUTER_API_KEY")
+                    applyAuth(model)
                     setBody(request)
                 }
 
@@ -230,6 +273,7 @@ class OpenRouterClient(
     private suspend fun StringBuilder.manageWithToolMessages(
         request: OpenRouterRequest,
         responseBody: OpenRouterResponse,
+        model: Model?,
         virtualToolHandler: (suspend (name: String, args: Map<String, JsonElement>) -> String?)? = null
     ) {
         val choice = responseBody.choices.firstOrNull()
@@ -253,13 +297,13 @@ class OpenRouterClient(
                     toolCalls = choice.message.toolCalls
                 ) + toolMessages
             )
-            val toolResponse: HttpResponse = client.post(OPENROUTER_COMPLETIONS_URL) {
+            val toolResponse: HttpResponse = client.post(completionUrl(model)) {
                 contentType(ContentType.Application.Json)
-                header("Authorization", "Bearer $OPENROUTER_API_KEY")
+                applyAuth(model)
                 setBody(newRequest)
             }
             if (toolResponse.status == HttpStatusCode.OK) {
-                manageWithToolMessages(newRequest, toolResponse.body(), virtualToolHandler)
+                manageWithToolMessages(newRequest, toolResponse.body(), model, virtualToolHandler)
             } else {
                 throw Exception("Error ${toolResponse.status}: ${toolResponse.bodyAsText()}")
             }
@@ -325,7 +369,7 @@ data class ResponseUsage(
     val completionTokens: Long,
     @SerialName("total_tokens")
     val totalTokens: Long,
-    val cost: Double
+    val cost: Double = 0.0,
 )
 
 @Serializable
@@ -361,4 +405,16 @@ data class SendMessageData(
     val outputUsedToken: Long,
     val totalUsedToken: Long,
     val cost: Double
+)
+
+@Serializable
+data class LocalModelsResponse(
+    val data: List<LocalModelDto> = emptyList(),
+)
+
+@Serializable
+data class LocalModelDto(
+    val id: String,
+    @SerialName("context_length")
+    val contextLength: Long? = null,
 )

@@ -67,12 +67,17 @@ fun ChatPanel(
                 text = title,
                 style = MaterialTheme.typography.headlineSmall
             )
-            Text(
-                text = "Нагрузка контекстного окна: ${
-                    (session?.totalToken ?: 0).toFloat().div(settings.model?.contextLength ?: 1).times(100).roundToInt()
-                }%",
-                style = MaterialTheme.typography.headlineSmall
-            )
+            settings.model?.contextLength?.let {
+                if (it > 0) {
+                    Text(
+                        text = "Нагрузка контекстного окна: ${
+                            (session?.totalToken ?: 0).toFloat().div(it).times(100).roundToInt()
+                        }%",
+                        style = MaterialTheme.typography.headlineSmall
+                    )
+                }
+            }
+
             if (taskContext != null) {
                 Text(
                     modifier = Modifier.fillMaxWidth(),

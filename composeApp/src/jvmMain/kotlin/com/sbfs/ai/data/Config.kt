@@ -5,11 +5,18 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class Config(
     val mcpServers: List<McpServerConfig> = emptyList(),
+    val localLlms: List<LocalLlmConfig> = emptyList(),
     val rag: RagConfig = RagConfig()
 )
 
 @Serializable
 data class McpServerConfig(
+    val name: String,
+    val url: String,
+)
+
+@Serializable
+data class LocalLlmConfig(
     val name: String,
     val url: String,
 )
