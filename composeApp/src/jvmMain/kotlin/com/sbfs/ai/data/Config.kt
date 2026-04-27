@@ -6,7 +6,8 @@ import kotlinx.serialization.Serializable
 data class Config(
     val mcpServers: List<McpServerConfig> = emptyList(),
     val localLlms: List<LocalLlmConfig> = emptyList(),
-    val rag: RagConfig = RagConfig()
+    val rag: RagConfig = RagConfig(),
+    val assistedProject: String? = null,
 )
 
 @Serializable

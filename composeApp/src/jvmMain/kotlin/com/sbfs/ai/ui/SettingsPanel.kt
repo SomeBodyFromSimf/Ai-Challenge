@@ -214,6 +214,20 @@ fun SettingsPanel(
                 }
             }
 
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Режим разработчика")
+                Switch(
+                    checked = settings.developerMode,
+                    onCheckedChange = { onSettingsChange(settings.copy(developerMode = it)) }
+                )
+            }
+
             var connectorsExpanded by remember { mutableStateOf(false) }
 
             ExposedDropdownMenuBox(

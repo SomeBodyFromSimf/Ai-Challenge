@@ -277,12 +277,23 @@ class ChatViewModel : ViewModel() {
     
     private fun syncDocuments() {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val result = documentIndexer.syncDocumentsFolder()
-            if (!result.folderNotFound) {
+            val config = configRepository.getConfig()
+            val (docsResult, projectResult) = documentIndexer.syncAll(config.assistedProject)
+            if (!docsResult.folderNotFound) {
                 println(
-                    "[RAG] Синхронизация: проиндексировано=${result.indexed}, " +
-                    "пропущено=${result.skipped}, ошибок=${result.failed}, удалено=${result.removed}"
+                    "[RAG] Документы: проиндексировано=${docsResult.indexed}, " +
+                    "пропущено=${docsResult.skipped}, ошибок=${docsResult.failed}, удалено=${docsResult.removed}"
                 )
+            }
+            projectResult?.let { r ->
+                if (!r.folderNotFound) {
+                    println(
+                        "[RAG] Проект: проиндексировано=${r.indexed}, " +
+                        "пропущено=${r.skipped}, ошибок=${r.failed}, удалено=${r.removed}"
+                    )
+                } else {
+                    println("[RAG] Папка проекта не найдена: ${config.assistedProject}")
+                }
             }
         }
     }
@@ -792,7 +803,8 @@ fun clearCurrentSession() {
     }
 
     suspend fun List<Message>.addSystemMetaData(query: String? = null): List<Message> {
-        val ragContext = if (_settings.value.ragMode && query != null) buildRagContext(query) else null
+        val useRag = _settings.value.ragMode || _settings.value.developerMode
+        val ragContext = if (useRag && query != null) buildRagContext(query) else null
         val storageContent = getStoragePrompt()
 
         val combined = listOfNotNull(storageContent, ragContext).joinToString("\n")
@@ -1005,22 +1017,35 @@ fun clearCurrentSession() {
         val sessionMemory = sessionMemoryRepository.getMemoryBySessionId(sessionId).first()
         val invariants = invariantsRepository.getInvariantsBySessionId(sessionId).first()
         val ragMode = _settings.value.ragMode
+        val developerMode = _settings.value.developerMode
+        val assistedProject = if (developerMode) configRepository.getConfig().assistedProject else null
 
         // Если нет данных для добавления, возвращаем null
-        if ((userProfile == null || userProfile.isDefault()) && sessionMemory.isEmpty() && invariants.isEmpty() && !ragMode) {
+        if ((userProfile == null || userProfile.isDefault()) && sessionMemory.isEmpty() && invariants.isEmpty() && !ragMode && !developerMode) {
             return null
         }
 
         // Создаем контент для системного сообщения
         return buildString {
-            if (ragMode) {
+            if (developerMode) {
+                append("#Ты — ассистент разработчика.\n")
+                if (assistedProject != null) {
+                    append("#Путь до проекта: $assistedProject. ")
+                    append("При вызове инструментов используй этот путь как project_path.\n\n")
+                }
                 append(
-                    "Отвечай ИСКЛЮЧИТЕЛЬНО на основе предоставленных фрагментов из базы знаний. " +
-                    "Не используй информацию, которой нет в предоставленном контексте. " +
-                    "При ответе ОБЯЗАТЕЛЬНО указывай источник цитатой в формате: " +
+                    "Если для ответа необходимы инструменты (tools) — вызови их в первую очередь. " +
+                    "Используй фрагменты из базы знаний как дополнительный контекст, если они релевантны. " +
+                    "При опоре на базу знаний указывай источник в формате [источник: «<название>»]. " +
+                    "Можешь также опираться на свои знания.\n"
+                )
+            } else if (ragMode) {
+                append(
+                    "Если для ответа доступны инструменты (tools) — вызови их в первую очередь. " +
+                    "В остальных случаях опирайся прежде всего на предоставленные фрагменты из базы знаний. " +
+                    "При использовании фрагментов ОБЯЗАТЕЛЬНО указывай источник в формате: " +
                     "[источник: «<название>»] — используй точное значение поля «источник» из заголовка фрагмента. " +
-                    "Если данные из базы знаний недостаточно релевантны для ответа на вопрос или ты не уверен в их применимости — " +
-                    "ответь именно так: «Не знаю, сформулируйте вопрос иначе».\n"
+                    "Если фрагменты из базы знаний нерелевантны вопросу — отвечай на основе своих знаний.\n"
                 )
             }
             userProfile?.takeIf { it.isDefault().not() }?.let { p ->

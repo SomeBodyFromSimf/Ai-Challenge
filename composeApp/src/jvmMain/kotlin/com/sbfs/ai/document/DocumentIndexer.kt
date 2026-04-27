@@ -33,8 +33,21 @@ class DocumentIndexer(
     private val documentsDir: File
         get() = File(System.getProperty("user.dir"), "documents")
 
+    private val stateFile: File
+        get() = File(System.getProperty("user.dir"), ".indexer_state")
+
     private val indexingEventChannel = Channel<IndexingEvent>()
     val indexingEventFlow = indexingEventChannel.receiveAsFlow()
+
+    // ── Точка входа ───────────────────────────────────────────────────────────
+
+    suspend fun syncAll(assistedProject: String?): Pair<SyncResult, SyncResult?> {
+        val docsResult = syncDocumentsFolder()
+        val projectResult = if (assistedProject != null) syncProjectFiles(assistedProject) else null
+        return docsResult to projectResult
+    }
+
+    // ── Синхронизация папки documents/ ────────────────────────────────────────
 
     /**
      * Синхронизирует папку documents/ с базой данных.
@@ -46,7 +59,6 @@ class DocumentIndexer(
      *
      * Файлы обрабатываются параллельно; внутри каждого файла эмбеддинги
      * запрашиваются последовательно, чтобы не перегружать Ollama.
-     *
      */
     suspend fun syncDocumentsFolder(): SyncResult = withContext(Dispatchers.IO) {
         if (!documentsDir.exists() || !documentsDir.isDirectory) {
@@ -59,17 +71,17 @@ class DocumentIndexer(
             .filter { it.isFile && TextExtractor.supports(it) }
             .toList()
 
+        val docsDirAbs = documentsDir.absolutePath
         val indexedDocs = documentRepository.getAllDocuments()
         val indexedByPath = indexedDocs.associateBy { it.path }
 
-        // Удаляем записи файлов, которых уже нет на диске
+        // Удаляем только те записи, которые принадлежат папке documents/ и которых нет на диске
         val diskPaths = filesOnDisk.map { it.absolutePath }.toSet()
-        val removed = indexedDocs.count { it.path !in diskPaths }
-        indexedDocs.filter { it.path !in diskPaths }.forEach { doc ->
+        val removed = indexedDocs.count { it.path.startsWith(docsDirAbs) && it.path !in diskPaths }
+        indexedDocs.filter { it.path.startsWith(docsDirAbs) && it.path !in diskPaths }.forEach { doc ->
             documentRepository.deleteDocument(doc.id)
         }
 
-        // Определяем, какие файлы нужно (пере)индексировать
         val toIndex = filesOnDisk.filter { file ->
             val existing = indexedByPath[file.absolutePath]
             val isUpToDate = existing != null
@@ -77,35 +89,124 @@ class DocumentIndexer(
                 && existing.fileSize == file.length()
                 && existing.status == DocumentStatus.INDEXED
             if (isUpToDate) return@filter false
-            // Удаляем устаревшее представление
             if (existing != null) documentRepository.deleteDocument(existing.id)
             true
         }
 
         val skipped = filesOnDisk.size - toIndex.size
-        val total = toIndex.size
-
-        if (total == 0) return@withContext SyncResult(skipped = skipped, removed = removed)
+        if (toIndex.isEmpty()) return@withContext SyncResult(skipped = skipped, removed = removed)
 
         val ollamaClient = OllamaClient(ragConfig.ollamaUrl, ragConfig.embeddingModel)
         try {
-            // Параллельная обработка файлов
-            val results: List<Boolean> = coroutineScope {
-                toIndex.map { file ->
-                    async(Dispatchers.IO) {
-                        indexingEventChannel.send(IndexingEvent.FileStarted(file.name))
-                        val success = indexFile(file, ragConfig, ollamaClient)
-                        indexingEventChannel.send(IndexingEvent.FileFinished(file.name))
-                        success
-                    }
-                }.awaitAll()
-            }
-            val indexed = results.count { it }
-            val failed  = results.count { !it }
-            SyncResult(indexed = indexed, skipped = skipped, failed = failed, removed = removed)
+            val results = indexFiles(toIndex, ragConfig, ollamaClient)
+            SyncResult(indexed = results.count { it }, skipped = skipped, failed = results.count { !it }, removed = removed)
         } finally {
             ollamaClient.close()
         }
+    }
+
+    // ── Синхронизация файлов ассистируемого проекта ───────────────────────────
+
+    /**
+     * Синхронизирует файлы проекта (README.md, docs/, api/) с базой данных.
+     *
+     * - Если проект изменился с прошлого запуска — индексируем новые файлы,
+     *   старые эмбеддинги НЕ удаляем.
+     * - Если проект тот же — проверяем изменения файлов, переиндексируем изменённые,
+     *   удаляем записи для файлов, которых больше нет на диске в рамках этого проекта.
+    */
+    private suspend fun syncProjectFiles(projectPath: String): SyncResult = withContext(Dispatchers.IO) {
+        val projectDir = File(projectPath)
+        if (!projectDir.exists() || !projectDir.isDirectory) {
+            return@withContext SyncResult(folderNotFound = true)
+        }
+
+        val ragConfig = configRepository.getConfig().rag
+        val lastProjectPath = readLastProjectPath()
+        val projectChanged = lastProjectPath != projectPath
+        val projectDirAbs = projectDir.absolutePath
+
+        val filesOnDisk = collectProjectFiles(projectDir)
+        val indexedDocs = documentRepository.getAllDocuments()
+        val indexedByPath = indexedDocs.associateBy { it.path }
+
+        var removed = 0
+        if (!projectChanged) {
+            // Тот же проект: удаляем записи файлов, которых больше нет на диске
+            val diskPaths = filesOnDisk.map { it.absolutePath }.toSet()
+            indexedDocs.filter { it.path.startsWith(projectDirAbs) && it.path !in diskPaths }.forEach { doc ->
+                documentRepository.deleteDocument(doc.id)
+                removed++
+            }
+        }
+        // Если проект изменился — старые эмбеддинги не трогаем
+
+        val toIndex = filesOnDisk.filter { file ->
+            val existing = indexedByPath[file.absolutePath]
+            val isUpToDate = existing != null
+                && existing.lastModified == file.lastModified()
+                && existing.fileSize == file.length()
+                && existing.status == DocumentStatus.INDEXED
+            if (isUpToDate) return@filter false
+            if (existing != null) documentRepository.deleteDocument(existing.id)
+            true
+        }
+
+        val skipped = filesOnDisk.size - toIndex.size
+
+        // Сохраняем новый путь проекта вне зависимости от того, есть ли что индексировать
+        saveLastProjectPath(projectPath)
+
+        if (toIndex.isEmpty()) return@withContext SyncResult(skipped = skipped, removed = removed)
+
+        val ollamaClient = OllamaClient(ragConfig.ollamaUrl, ragConfig.embeddingModel)
+        try {
+            val results = indexFiles(toIndex, ragConfig, ollamaClient)
+            SyncResult(indexed = results.count { it }, skipped = skipped, failed = results.count { !it }, removed = removed)
+        } finally {
+            ollamaClient.close()
+        }
+    }
+
+    // ── Вспомогательные методы ─────────────────────────────────────────────────
+
+    /** Собирает файлы проекта: README.md в корне + всё из docs/ и api/. */
+    private fun collectProjectFiles(projectDir: File): List<File> {
+        val files = mutableListOf<File>()
+        File(projectDir, "README.md").takeIf { it.exists() && it.isFile }?.let { files.add(it) }
+        listOf("docs", "api").forEach { dirName ->
+            File(projectDir, dirName)
+                .takeIf { it.exists() && it.isDirectory }
+                ?.walkTopDown()
+                ?.filter { it.isFile && TextExtractor.supports(it) }
+                ?.forEach { files.add(it) }
+        }
+        return files
+    }
+
+    private fun readLastProjectPath(): String? = try {
+        if (stateFile.exists()) stateFile.readText().trim().takeIf { it.isNotEmpty() } else null
+    } catch (_: Exception) { null }
+
+    private fun saveLastProjectPath(path: String) = try {
+        stateFile.writeText(path)
+    } catch (_: Exception) { }
+
+    // ── Параллельная индексация списка файлов ──────────────────────────────────
+
+    private suspend fun indexFiles(
+        files: List<File>,
+        ragConfig: RagConfig,
+        ollamaClient: OllamaClient,
+    ): List<Boolean> = coroutineScope {
+        files.map { file ->
+            async(Dispatchers.IO) {
+                indexingEventChannel.send(IndexingEvent.FileStarted(file.name))
+                val success = indexFile(file, ragConfig, ollamaClient)
+                indexingEventChannel.send(IndexingEvent.FileFinished(file.name))
+                success
+            }
+        }.awaitAll()
     }
 
     // ── Индексация одного файла ────────────────────────────────────────────────
@@ -116,7 +217,6 @@ class DocumentIndexer(
         return try {
             val text = TextExtractor.extract(file)
 
-            // Генерируем заголовок через LLM; если не получилось — используем имя файла без расширения
             val title = ollama.generateTitle(text, ragConfig.titleModel)
                 ?: file.nameWithoutExtension
 
@@ -137,7 +237,6 @@ class DocumentIndexer(
             val chunks = ChunkingService.chunk(text, ragConfig)
             var embeddingsMissing = false
 
-            // Последовательные вызовы Ollama внутри одного файла
             chunks.forEachIndexed { index, chunkText ->
                 val embedding = ollama.embed(chunkText)
                 if (embedding == null) embeddingsMissing = true

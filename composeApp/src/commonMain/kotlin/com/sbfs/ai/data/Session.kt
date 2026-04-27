@@ -30,4 +30,5 @@ data class SessionSettings(
     val responseFormat: String? = null,
     val ragMode: Boolean = false,
     val enhancedRag: Boolean = false,
+    val developerMode: Boolean = false,
 )
