@@ -88,6 +88,11 @@ class OpenRouterClient(
             header("Authorization", "Bearer $OPENROUTER_API_KEY")
         }
     }
+
+    suspend fun generateResponse(prompt: String, model: Model): String {
+        val settings = SessionSettings(model = model)
+        return sendSystemMessage(prompt, settings).content
+    }
     
     suspend fun sendMessage(
         messages: List<Message>,
@@ -222,7 +227,7 @@ class OpenRouterClient(
         return withContext(Dispatchers.IO) {
             try {
                 val systemMessage = MessageData(
-                    role = MessageRole.SYSTEM,
+                    role = MessageRole.USER,
                     content = content
                 )
                 

@@ -65,6 +65,20 @@ class SchedulerManager(
         activeJobs.clear()
     }
 
+    fun schedulePeriodicAction(
+        intervalSeconds: Long,
+        action: suspend () -> Unit
+    ): String {
+        val jobId = UUID.randomUUID().toString()
+        activeJobs[jobId] = scope.launch {
+            while (isActive) {
+                action()
+                delay(intervalSeconds * 1000L)
+            }
+        }
+        return jobId
+    }
+
     private fun scheduleDeferred(
         sessionId: String,
         settings: SessionSettings,

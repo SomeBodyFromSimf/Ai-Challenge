@@ -3,20 +3,14 @@ package com.sbfs.ai.document
 import com.sbfs.ai.data.DocumentChunk
 import com.sbfs.ai.data.DocumentIndex
 import com.sbfs.ai.data.DocumentStatus
-import com.sbfs.ai.data.IndexingStatus
 import com.sbfs.ai.data.RagConfig
-import com.sbfs.ai.repository.DocumentRepository
 import com.sbfs.ai.repository.ConfigRepository
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
+import com.sbfs.ai.repository.DocumentRepository
+import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.receiveAsFlow
-import kotlinx.coroutines.withContext
 import java.io.File
-import java.util.UUID
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.*
 
 data class SyncResult(
     val indexed: Int = 0,
@@ -45,6 +39,25 @@ class DocumentIndexer(
         val docsResult = syncDocumentsFolder()
         val projectResult = if (assistedProject != null) syncProjectFiles(assistedProject) else null
         return docsResult to projectResult
+    }
+
+    private suspend fun cloneOrPull(repoUrl: String, localPath: File) {
+        withContext(Dispatchers.IO) {
+            if (!localPath.exists()) {
+                localPath.mkdirs()
+                ProcessBuilder("git", "clone", repoUrl, localPath.absolutePath)
+                    .redirectOutput(ProcessBuilder.Redirect.INHERIT)
+                    .redirectError(ProcessBuilder.Redirect.INHERIT)
+                    .start()
+                    .waitFor()
+            } else {
+                ProcessBuilder("git", "-C", localPath.absolutePath, "pull")
+                    .redirectOutput(ProcessBuilder.Redirect.INHERIT)
+                    .redirectError(ProcessBuilder.Redirect.INHERIT)
+                    .start()
+                    .waitFor()
+            }
+        }
     }
 
     // ── Синхронизация папки documents/ ────────────────────────────────────────
@@ -116,17 +129,26 @@ class DocumentIndexer(
      *   удаляем записи для файлов, которых больше нет на диске в рамках этого проекта.
     */
     private suspend fun syncProjectFiles(projectPath: String): SyncResult = withContext(Dispatchers.IO) {
-        val projectDir = File(projectPath)
-        if (!projectDir.exists() || !projectDir.isDirectory) {
+        val isRemote = projectPath.startsWith("http") || projectPath.startsWith("git@")
+        val localDir: File
+        if (isRemote) {
+            val repoName = projectPath.substringAfterLast('/').removeSuffix(".git")
+            localDir = File(System.getProperty("user.dir"), "temp_repos/$repoName")
+            cloneOrPull(projectPath, localDir)
+        } else {
+            localDir = File(projectPath)
+        }
+
+        if (!localDir.exists() || !localDir.isDirectory) {
             return@withContext SyncResult(folderNotFound = true)
         }
 
         val ragConfig = configRepository.getConfig().rag
         val lastProjectPath = readLastProjectPath()
         val projectChanged = lastProjectPath != projectPath
-        val projectDirAbs = projectDir.absolutePath
+        val projectDirAbs = localDir.absolutePath
 
-        val filesOnDisk = collectProjectFiles(projectDir)
+        val filesOnDisk = collectProjectFiles(localDir)
         val indexedDocs = documentRepository.getAllDocuments()
         val indexedByPath = indexedDocs.associateBy { it.path }
 

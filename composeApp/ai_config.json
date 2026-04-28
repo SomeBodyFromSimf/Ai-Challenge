@@ -1,9 +1,5 @@
 {
   "mcpServers": [
-    {
-      "name": "Own",
-      "url": "http://localhost:3000/mcp"
-    }
   ],
   "localLlms": [
     {
@@ -11,5 +7,7 @@
       "url": "http://localhost:11434"
     }
   ],
-  "assistedProject": "H:\\Progs\\IntelliJ IDEA 2025.3.3\\Projects\\Test-Ktor-Server"
+  "assistedProject": null,
+  "githubRepo": "SomeBodyFromSimf/TestKtorServer",
+  "githubToken": ""
 }

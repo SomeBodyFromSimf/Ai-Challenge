@@ -8,6 +8,8 @@ data class Config(
     val localLlms: List<LocalLlmConfig> = emptyList(),
     val rag: RagConfig = RagConfig(),
     val assistedProject: String? = null,
+    val githubRepo: String? = null,
+    val githubToken: String? = null,
 )
 
 @Serializable

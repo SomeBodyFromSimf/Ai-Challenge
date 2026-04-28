@@ -1,0 +1,25 @@
+import kotlin.Boolean;
+
+CREATE TABLE IF NOT EXISTS PullRequest (
+    id TEXT PRIMARY KEY,
+    number INTEGER NOT NULL,
+    state TEXT NOT NULL,
+    reviewed INTEGER AS Boolean NOT NULL DEFAULT 0,
+    createdAt INTEGER NOT NULL
+);
+
+insertPullRequest:
+INSERT INTO PullRequest(id, number, state, reviewed, createdAt)
+VALUES (?, ?, ?, ?, ?);
+
+getAllUnreviewed:
+SELECT * FROM PullRequest
+WHERE reviewed = 0;
+
+markReviewed:
+UPDATE PullRequest
+SET reviewed = 1
+WHERE id = ?;
+
+getAllNumbers:
+SELECT number FROM PullRequest;

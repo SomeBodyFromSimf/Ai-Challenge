@@ -2,6 +2,7 @@ package com.sbfs.ai.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.sbfs.ai.GithubMonitor
 import com.sbfs.ai.McpManager
 import com.sbfs.ai.OpenRouterClient
 import com.sbfs.ai.SchedulerManager
@@ -43,6 +44,8 @@ class ChatViewModel : ViewModel() {
     private val documentIndexer = DocumentIndexer(documentRepository, configRepository)
     private var ragRetriever: com.sbfs.ai.document.RagRetriever? = null
     private val ragQueryMemories = mutableMapOf<String, com.sbfs.ai.document.RagQueryMemory>()
+
+    private val pullRequestRepository = PullRequestRepository(db)
 
     private val mcpManager = McpManager()
     private val openRouterClient = OpenRouterClient(mcpManager)
@@ -258,6 +261,11 @@ class ChatViewModel : ViewModel() {
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), "")
 
+
+    private val githubMonitor = GithubMonitor(configRepository, pullRequestRepository, openRouterClient) {
+        settings.value.model
+    }
+
     init {
         viewModelScope.launch {
             userProfile.filterNotNull().collect {
@@ -273,6 +281,10 @@ class ChatViewModel : ViewModel() {
         loadMcpServers()
         // Индексируем документы из папки documents/
         syncDocuments()
+        // Start polling for new PRs every 2 minutes
+        schedulerManager.schedulePeriodicAction(20) {
+            githubMonitor.checkNewPullRequests()
+        }
     }
     
     private fun syncDocuments() {
