@@ -7,7 +7,9 @@ data class Config(
     val mcpServers: List<McpServerConfig> = emptyList(),
     val localLlms: List<LocalLlmConfig> = emptyList(),
     val rag: RagConfig = RagConfig(),
-    val assistedProject: String? = null,
+    val assistedDevProject: String? = null,
+    val assistedSupportProject: String? = null,
+    val assistedUserToken: String? = null,
 )
 
 @Serializable

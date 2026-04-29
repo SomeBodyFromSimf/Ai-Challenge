@@ -11,7 +11,7 @@ import javax.xml.parsers.DocumentBuilderFactory
 
 object TextExtractor {
 
-    private val SUPPORTED_EXTENSIONS = setOf("txt", "md", "kt", "kts", "java", "json", "csv", "xml", "pdf", "docx", "doc")
+    val SUPPORTED_EXTENSIONS = setOf("txt", "md", "kt", "kts", "java", "json", "csv", "xml", "pdf", "docx", "doc")
 
     fun supports(file: File): Boolean = file.extension.lowercase() in SUPPORTED_EXTENSIONS
 

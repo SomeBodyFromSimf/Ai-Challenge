@@ -1,6 +1,8 @@
 package com.sbfs.ai.document
 
+import com.sbfs.ai.data.AgentMode
 import com.sbfs.ai.data.DocumentChunk
+import com.sbfs.ai.data.DocumentSource
 import com.sbfs.ai.data.RagConfig
 import com.sbfs.ai.repository.DocumentRepository
 import kotlin.math.sqrt
@@ -35,6 +37,7 @@ class RagRetriever(
      * Возвращает наиболее релевантные чанки для [query].
      *
      * [queryEmbedding] — предвычисленный эмбеддинг запроса (экономит вызов к Ollama).
+     * [agentMode] — режим агента, определяющий источники для поиска.
      *
      * При [useEnhanced] = false: чистый cosine similarity, topK без фильтрации.
      *
@@ -50,16 +53,47 @@ class RagRetriever(
         topK: Int = 5,
         useEnhanced: Boolean = true,
         queryEmbedding: FloatArray? = null,
+        agentMode: AgentMode = AgentMode.DISABLED,
     ): List<ScoredChunk> {
         val allChunks = documentRepository.getAllChunks()
         if (allChunks.isEmpty()) return emptyList()
+        
+        // Получаем все документы для определения источника каждого чанка
+        val allDocuments = documentRepository.getAllDocuments()
+        val documentSourceMap = allDocuments.associateBy({ it.id }, { it.source })
+
+        // Фильтруем чанки в зависимости от режима агента
+        val filteredChunks = when (agentMode) {
+            AgentMode.DISABLED -> {
+                // Только чанки из документов с source = DOCUMENTS
+                allChunks.filter { chunk -> 
+                    documentSourceMap[chunk.documentId] == DocumentSource.DOCUMENTS 
+                }
+            }
+            AgentMode.DEVELOPER -> {
+                // Чанки из документов с source = DOCUMENTS или source = DEV_PROJECT
+                allChunks.filter { chunk -> 
+                    val source = documentSourceMap[chunk.documentId]
+                    source == DocumentSource.DOCUMENTS || source == DocumentSource.DEV_PROJECT
+                }
+            }
+            AgentMode.SUPPORT -> {
+                // Чанки из документов с source = DOCUMENTS или source = SUPPORT_PROJECT
+                allChunks.filter { chunk -> 
+                    val source = documentSourceMap[chunk.documentId]
+                    source == DocumentSource.DOCUMENTS || source == DocumentSource.SUPPORT_PROJECT
+                }
+            }
+        }
+
+        if (filteredChunks.isEmpty()) return emptyList()
 
         val effectiveVec: FloatArray? = queryEmbedding ?: ollamaClient.embed(query)?.toFloatArray()
 
         // ── Простой режим: только cosine similarity ────────────────────────────
         if (!useEnhanced) {
             val queryVec = effectiveVec ?: return emptyList()
-            return allChunks
+            return filteredChunks
                 .filter { it.embedding != null }
                 .map { chunk -> ScoredChunk(chunk, cosineSimilarity(queryVec, chunk.embedding!!.toFloatArray())) }
                 .sortedByDescending { it.score }
@@ -69,33 +103,33 @@ class RagRetriever(
         val candidates = topK * ragConfig.candidateMultiplier
 
         // ── BM25 ──────────────────────────────────────────────────────────────
-        val bm25 = BM25Scorer(allChunks)
+        val bm25 = BM25Scorer(filteredChunks)
         val queryTokens = bm25.tokenize(query)
-        val bm25Scores = FloatArray(allChunks.size) { i -> bm25.score(queryTokens, i) }
+        val bm25Scores = FloatArray(filteredChunks.size) { i -> bm25.score(queryTokens, i) }
 
         // ── Embedding cosine similarity ────────────────────────────────────────
-        val embScores = FloatArray(allChunks.size) { i ->
-            if (effectiveVec != null && allChunks[i].embedding != null)
-                cosineSimilarity(effectiveVec, allChunks[i].embedding!!.toFloatArray())
+        val embScores = FloatArray(filteredChunks.size) { i ->
+            if (effectiveVec != null && filteredChunks[i].embedding != null)
+                cosineSimilarity(effectiveVec, filteredChunks[i].embedding!!.toFloatArray())
             else 0f
         }
 
         // ── RRF fusion ────────────────────────────────────────────────────────
-        val bm25RankOf = IntArray(allChunks.size)
-        val embRankOf  = IntArray(allChunks.size)
+        val bm25RankOf = IntArray(filteredChunks.size)
+        val embRankOf  = IntArray(filteredChunks.size)
 
-        allChunks.indices.sortedByDescending { bm25Scores[it] }
+        filteredChunks.indices.sortedByDescending { bm25Scores[it] }
             .forEachIndexed { rank, idx -> bm25RankOf[idx] = rank }
-        allChunks.indices.sortedByDescending { embScores[it] }
+        filteredChunks.indices.sortedByDescending { embScores[it] }
             .forEachIndexed { rank, idx -> embRankOf[idx] = rank }
 
         val rrfK = 60
-        val rrfScores = FloatArray(allChunks.size) { i ->
+        val rrfScores = FloatArray(filteredChunks.size) { i ->
             1f / (rrfK + bm25RankOf[i]) + 1f / (rrfK + embRankOf[i])
         }
 
         // ── Top candidates + minScore filter ──────────────────────────────────
-        val topByRrf = allChunks.indices
+        val topByRrf = filteredChunks.indices
             .sortedByDescending { rrfScores[it] }
             .take(candidates)
 
@@ -110,13 +144,13 @@ class RagRetriever(
         // ── MMR diversification ───────────────────────────────────────────────
         val selected = mmr(
             candidates = filtered,
-            allChunks  = allChunks,
+            allChunks  = filteredChunks,
             rrfScores  = rrfScores,
             lambda     = ragConfig.mmrLambda,
             topK       = topK,
         )
 
-        return selected.map { i -> ScoredChunk(allChunks[i], embScores[i]) }
+        return selected.map { i -> ScoredChunk(filteredChunks[i], embScores[i]) }
     }
 
     fun close() = ollamaClient.close()

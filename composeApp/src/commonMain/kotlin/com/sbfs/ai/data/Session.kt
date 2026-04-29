@@ -14,6 +14,13 @@ data class Session(
 )
 
 @Serializable
+enum class AgentMode {
+    DISABLED,
+    DEVELOPER,
+    SUPPORT
+}
+
+@Serializable
 data class SessionSettings(
     val model: Model? = null,
     val temperature: Double = 1.0,
@@ -30,5 +37,5 @@ data class SessionSettings(
     val responseFormat: String? = null,
     val ragMode: Boolean = false,
     val enhancedRag: Boolean = false,
-    val developerMode: Boolean = false,
+    val agentMode: AgentMode = AgentMode.DISABLED,
 )

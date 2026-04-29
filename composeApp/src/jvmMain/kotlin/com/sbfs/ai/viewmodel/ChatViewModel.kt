@@ -275,24 +275,34 @@ class ChatViewModel : ViewModel() {
         syncDocuments()
     }
     
-    private fun syncDocuments() {
+private fun syncDocuments() {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val config = configRepository.getConfig()
-            val (docsResult, projectResult) = documentIndexer.syncAll(config.assistedProject)
+            val (docsResult, devProjectResult, supportProjectResult) = documentIndexer.syncAll(config.assistedDevProject, config.assistedSupportProject)
             if (!docsResult.folderNotFound) {
                 println(
                     "[RAG] Документы: проиндексировано=${docsResult.indexed}, " +
                     "пропущено=${docsResult.skipped}, ошибок=${docsResult.failed}, удалено=${docsResult.removed}"
                 )
             }
-            projectResult?.let { r ->
+            devProjectResult?.let { r ->
                 if (!r.folderNotFound) {
                     println(
-                        "[RAG] Проект: проиндексировано=${r.indexed}, " +
+                        "[RAG] Проект разработки: проиндексировано=${r.indexed}, " +
                         "пропущено=${r.skipped}, ошибок=${r.failed}, удалено=${r.removed}"
                     )
                 } else {
-                    println("[RAG] Папка проекта не найдена: ${config.assistedProject}")
+                    println("[RAG] Папка проекта разработки не найдена: ${config.assistedDevProject}")
+                }
+            }
+            supportProjectResult?.let { r ->
+                if (!r.folderNotFound) {
+                    println(
+                        "[RAG] Проект поддержки: проиндексировано=${r.indexed}, " +
+                        "пропущено=${r.skipped}, ошибок=${r.failed}, удалено=${r.removed}"
+                    )
+                } else {
+                    println("[RAG] Папка проекта поддержки не найдена: ${config.assistedSupportProject}")
                 }
             }
         }
@@ -802,8 +812,8 @@ fun clearCurrentSession() {
         }
     }
 
-    suspend fun List<Message>.addSystemMetaData(query: String? = null): List<Message> {
-        val useRag = _settings.value.ragMode || _settings.value.developerMode
+suspend fun List<Message>.addSystemMetaData(query: String? = null): List<Message> {
+        val useRag = _settings.value.ragMode || _settings.value.agentMode != AgentMode.DISABLED
         val ragContext = if (useRag && query != null) buildRagContext(query) else null
         val storageContent = getStoragePrompt()
 
@@ -917,6 +927,7 @@ fun clearCurrentSession() {
             topK = topK,
             useEnhanced = enhanced,
             queryEmbedding = effectiveEmbedding,
+            agentMode = _settings.value.agentMode,
         )
 
         if (scored.isEmpty()) return null
@@ -1011,42 +1022,66 @@ fun clearCurrentSession() {
         }
     }
 
-    private suspend fun getStoragePrompt() : String? {
+private suspend fun getStoragePrompt() : String? {
         val sessionId = currentSessionId.value ?: return null
         val userProfile = userProfileRepository.getUserProfile().first()
         val sessionMemory = sessionMemoryRepository.getMemoryBySessionId(sessionId).first()
         val invariants = invariantsRepository.getInvariantsBySessionId(sessionId).first()
         val ragMode = _settings.value.ragMode
-        val developerMode = _settings.value.developerMode
-        val assistedProject = if (developerMode) configRepository.getConfig().assistedProject else null
+        val agentMode = _settings.value.agentMode
+        val assistedDevProject = when (agentMode) {
+            AgentMode.DEVELOPER -> configRepository.getConfig().assistedDevProject
+            else -> null
+        }
 
         // Если нет данных для добавления, возвращаем null
-        if ((userProfile == null || userProfile.isDefault()) && sessionMemory.isEmpty() && invariants.isEmpty() && !ragMode && !developerMode) {
+        if ((userProfile == null || userProfile.isDefault()) && sessionMemory.isEmpty() && invariants.isEmpty() && !ragMode && agentMode == AgentMode.DISABLED) {
             return null
         }
 
         // Создаем контент для системного сообщения
         return buildString {
-            if (developerMode) {
-                append("#Ты — ассистент разработчика.\n")
-                if (assistedProject != null) {
-                    append("#Путь до проекта: $assistedProject. ")
-                    append("При вызове инструментов используй этот путь как project_path.\n\n")
+            when (agentMode) {
+                AgentMode.DEVELOPER -> {
+                    append("#Ты — ассистент разработчика.\n")
+                    if (assistedDevProject != null) {
+                        append("#Путь до проекта: $assistedDevProject. ")
+                        append("При вызове инструментов используй этот путь как project_path.\n\n")
+                    }
+                    append(
+                        "Если для ответа необходимы инструменты (tools) — вызови их в первую очередь. " +
+                        "Используй фрагменты из базы знаний как дополнительный контекст, если они релевантны. " +
+                        "При опоре на базу знаний указывай источник в формате [источник: «<название>»]. " +
+                        "Можешь также опираться на свои знания.\n"
+                    )
                 }
-                append(
-                    "Если для ответа необходимы инструменты (tools) — вызови их в первую очередь. " +
-                    "Используй фрагменты из базы знаний как дополнительный контекст, если они релевантны. " +
-                    "При опоре на базу знаний указывай источник в формате [источник: «<название>»]. " +
-                    "Можешь также опираться на свои знания.\n"
-                )
-            } else if (ragMode) {
-                append(
-                    "Если для ответа доступны инструменты (tools) — вызови их в первую очередь. " +
-                    "В остальных случаях опирайся прежде всего на предоставленные фрагменты из базы знаний. " +
-                    "При использовании фрагментов ОБЯЗАТЕЛЬНО указывай источник в формате: " +
-                    "[источник: «<название>»] — используй точное значение поля «источник» из заголовка фрагмента. " +
-                    "Если фрагменты из базы знаний нерелевантны вопросу — отвечай на основе своих знаний.\n"
-                )
+                AgentMode.SUPPORT -> {
+                    append("#Ты — ассистент поддержки.\n")
+                    val (assistedSupportProject, token) = configRepository.getConfig().let { it.assistedSupportProject to it.assistedUserToken }
+                    if (assistedSupportProject != null) {
+                        append("#Репозиторий проекта: $assistedSupportProject. ")
+                        append("При необходимости создания issue в этом репозитории используй инструмент 'create_github_issue'. Токен для создания: $token. Ни в коем случае не пиши его пользователю. Используй только для вызову tool\n\n")
+                    }
+                    append(
+                        "Цель: решить проблему пользователя за счет базы знаний. " +
+                        "Если данных недостаточно для решения проблемы, предложи пользователю создать issue. " +
+                        "Issues создаются только после подтверждения пользователя и с достаточным описанием проблемы.\n\n" +
+                        "Если для ответа необходимы инструменты (tools) — вызови. " +
+                        "В остальных случаях опирайся прежде всего на предоставленные фрагменты из базы знаний. " +
+                        "Если фрагменты из базы знаний нерелевантны вопросу — отвечай на основе своих знаний.\n"
+                    )
+                }
+                AgentMode.DISABLED -> {
+                    if (ragMode) {
+                        append(
+                            "Если для ответа доступны инструменты (tools) — вызови их в первую очередь. " +
+                            "В остальных случаях опирайся прежде всего на предоставленные фрагменты из базы знаний. " +
+                            "При использовании фрагментов ОБЯЗАТЕЛЬНО указывай источник в формате: " +
+                            "[источник: «<название>»] — используй точное значение поля «источник» из заголовка фрагмента. " +
+                            "Если фрагменты из базы знаний нерелевантны вопросу — отвечай на основе своих знаний.\n"
+                        )
+                    }
+                }
             }
             userProfile?.takeIf { it.isDefault().not() }?.let { p ->
                 append("Профиль пользователя:\n")

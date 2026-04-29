@@ -1,5 +1,13 @@
 package com.sbfs.mcp
 
+import io.ktor.client.*
+import io.ktor.client.call.*
+import io.ktor.client.engine.cio.*
+import io.ktor.client.plugins.contentnegotiation.*
+import io.ktor.client.request.*
+import io.ktor.client.statement.*
+import io.ktor.http.*
+import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
 import io.ktor.server.engine.*
 import io.ktor.server.netty.*
@@ -123,7 +131,7 @@ fun createServer(): Server {
         CallToolResult(content = listOf(TextContent(content)))
     }
 
-    server.addTool(
+server.addTool(
         name = "get_git_diff",
         description = "Returns the git diff of the project for code review. " +
                 "If 'base' is provided, shows changes since that ref (e.g. 'main', 'origin/main', 'HEAD~1'). " +
@@ -163,6 +171,97 @@ fun createServer(): Server {
 
         val result = diff.trim().ifEmpty { "No changes found." }
         CallToolResult(content = listOf(TextContent(result)))
+    }
+    
+    server.addTool(
+        name = "create_github_issue",
+        description = "Creates a new issue in a GitHub repository.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                putJsonObject("project") {
+                    put("type", "string")
+                    put("description", "GitHub repository in the format 'owner/repo'")
+                }
+                putJsonObject("token") {
+                    put("type", "string")
+                    put("description", "GitHub token")
+                }
+                putJsonObject("title") {
+                    put("type", "string")
+                    put("description", "Issue title")
+                }
+                putJsonObject("body") {
+                    put("type", "string")
+                    put("description", "Issue body (description)")
+                }
+            },
+            required = listOf("project", "title", "body"),
+        ),
+    ) { request ->
+        val project = request.arguments?.get("project")?.jsonPrimitive?.content
+            ?: return@addTool CallToolResult(
+                content = listOf(TextContent("'project' is required."))
+            )
+        val token = request.arguments?.get("token")?.jsonPrimitive?.content
+            ?: return@addTool CallToolResult(
+                content = listOf(TextContent("'token' is required."))
+            )
+        val title = request.arguments?.get("title")?.jsonPrimitive?.content
+            ?: return@addTool CallToolResult(
+                content = listOf(TextContent("'title' is required."))
+            )
+        val body = request.arguments?.get("body")?.jsonPrimitive?.content
+            ?: return@addTool CallToolResult(
+                content = listOf(TextContent("'body' is required."))
+            )
+
+        // Проверяем формат project
+        val parts = project.split("/")
+        if (parts.size != 2) {
+            return@addTool CallToolResult(
+                content = listOf(TextContent("Invalid project format. Expected 'owner/repo'."))
+            )
+        }
+        val owner = parts[0]
+        val repo = parts[1]
+
+        try {
+            val httpClient = HttpClient(CIO) {
+                install(ContentNegotiation) {
+                    json()
+                }
+            }
+            
+            val response: HttpResponse = httpClient.post("https://api.github.com/repos/$owner/$repo/issues") {
+                contentType(ContentType.Application.Json)
+                header("Authorization", "Bearer $token")
+                setBody(
+                    buildJsonObject {
+                        put("title", title)
+                        put("body", body)
+                    }
+                )
+            }
+            
+            httpClient.close()
+            
+            if (response.status == HttpStatusCode.Created) {
+                val responseBody = response.bodyAsText()
+                val jsonResponse = Json.parseToJsonElement(responseBody).jsonObject
+                val issueNumber = jsonResponse["number"]?.jsonPrimitive?.content
+                
+                if (issueNumber != null) {
+                    CallToolResult(content = listOf(TextContent(issueNumber)))
+                } else {
+                    CallToolResult(content = listOf(TextContent("Failed to parse issue number from response.")))
+                }
+            } else {
+                val errorMessage = response.bodyAsText()
+                CallToolResult(content = listOf(TextContent("Failed to create issue. Status: ${response.status}, Error: $errorMessage")))
+            }
+        } catch (e: Exception) {
+            CallToolResult(content = listOf(TextContent("Failed to create issue: ${e.message}")))
+        }
     }
 
     return server

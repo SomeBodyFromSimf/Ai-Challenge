@@ -1,5 +1,14 @@
 package com.sbfs.ai.data
 
+import kotlinx.serialization.Serializable
+
+@Serializable
+enum class DocumentSource {
+    DOCUMENTS,
+    DEV_PROJECT,
+    SUPPORT_PROJECT
+}
+
 data class DocumentIndex(
     val id: String,
     val path: String,
@@ -10,6 +19,7 @@ data class DocumentIndex(
     val indexedAt: Long,
     val chunkCount: Int,
     val status: DocumentStatus,
+    val source: DocumentSource,
 )
 
 data class DocumentChunk(

@@ -4,6 +4,7 @@ import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
 import com.sbfs.ai.data.DocumentChunk
 import com.sbfs.ai.data.DocumentIndex
+import com.sbfs.ai.data.DocumentSource
 import com.sbfs.ai.data.DocumentStatus
 import com.sbfs.ai.db.AiChallengeDb
 import kotlinx.coroutines.Dispatchers
@@ -44,6 +45,7 @@ class DocumentRepository(db: AiChallengeDb) {
                 indexedAt    = doc.indexedAt,
                 chunkCount   = doc.chunkCount.toLong(),
                 status       = doc.status.name,
+                source       = doc.source.name,
             )
         )
     }
@@ -98,6 +100,7 @@ class DocumentRepository(db: AiChallengeDb) {
         indexedAt    = indexedAt,
         chunkCount   = chunkCount.toInt(),
         status       = DocumentStatus.valueOf(status),
+        source       = DocumentSource.valueOf(source)
     )
 
     private fun com.sbfs.ai.database.Document_chunk.toDomain() = DocumentChunk(

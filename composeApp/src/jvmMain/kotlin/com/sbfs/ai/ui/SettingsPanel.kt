@@ -1,5 +1,6 @@
 package com.sbfs.ai.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.material3.ExposedDropdownMenuAnchorType.Companion.PrimaryNotEditable
@@ -7,6 +8,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.sbfs.ai.data.AgentMode
 import com.sbfs.ai.data.Model
 import com.sbfs.ai.data.SessionSettings
 
@@ -216,16 +218,35 @@ fun SettingsPanel(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Режим разработчика")
-                Switch(
-                    checked = settings.developerMode,
-                    onCheckedChange = { onSettingsChange(settings.copy(developerMode = it)) }
-                )
+            Text(
+                text = "Режим агента",
+                style = MaterialTheme.typography.titleMedium
+            )
+            
+            val agentModes = listOf(
+                AgentMode.DISABLED to "Выкл",
+                AgentMode.DEVELOPER to "Режим разработчика",
+                AgentMode.SUPPORT to "Режим поддержки"
+            )
+            
+            agentModes.forEach { (mode, label) ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = settings.agentMode == mode,
+                        onClick = { onSettingsChange(settings.copy(agentMode = mode)) }
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.clickable { onSettingsChange(settings.copy(agentMode = mode)) }
+                    )
+                }
             }
 
             var connectorsExpanded by remember { mutableStateOf(false) }
