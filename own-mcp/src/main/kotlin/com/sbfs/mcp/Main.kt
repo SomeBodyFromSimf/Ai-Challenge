@@ -131,6 +131,218 @@ fun createServer(): Server {
         CallToolResult(content = listOf(TextContent(content)))
     }
 
+    server.addTool(
+        name = "write_project_file",
+        description = "Writes content to a file inside the given project directory. Creates the file if it doesn't exist, or overwrites it if it does.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                putJsonObject("project_path") {
+                    put("type", "string")
+                    put("description", "Absolute path to the project root directory")
+                }
+                putJsonObject("file_path") {
+                    put("type", "string")
+                    put("description", "Relative path to the file inside the project (e.g. 'src/Main.kt' or 'README.md')")
+                }
+                putJsonObject("content") {
+                    put("type", "string")
+                    put("description", "Content to write to the file")
+                }
+            },
+            required = listOf("project_path", "file_path", "content"),
+        ),
+    ) { request ->
+        val projectPath = request.arguments?.get("project_path")?.jsonPrimitive?.content
+            ?: return@addTool CallToolResult(
+                content = listOf(TextContent("'project_path' is required."))
+            )
+        val filePath = request.arguments?.get("file_path")?.jsonPrimitive?.content
+            ?: return@addTool CallToolResult(
+                content = listOf(TextContent("'file_path' is required."))
+            )
+        val content = request.arguments?.get("content")?.jsonPrimitive?.content ?: ""
+
+        val projectDir = File(projectPath).canonicalFile
+        val targetFile = File(projectDir, filePath).canonicalFile
+
+        // Защита от path traversal
+        if (!targetFile.absolutePath.startsWith(projectDir.absolutePath)) {
+            return@addTool CallToolResult(
+                content = listOf(TextContent("Access denied: file is outside the project directory."))
+            )
+        }
+
+        try {
+            // Создаем родительские директории если они не существуют
+            targetFile.parentFile?.mkdirs()
+            targetFile.writeText(content)
+            CallToolResult(content = listOf(TextContent("Successfully wrote to file: $filePath")))
+        } catch (e: Exception) {
+            return@addTool CallToolResult(
+                content = listOf(TextContent("Failed to write file: ${e.message}"))
+            )
+        }
+    }
+
+    server.addTool(
+        name = "list_project_files",
+        description = "Lists files in the given project directory. Optionally filters by extension.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                putJsonObject("project_path") {
+                    put("type", "string")
+                    put("description", "Absolute path to the project root directory")
+                }
+                putJsonObject("file_extension") {
+                    put("type", "string")
+                    put("description", "Optional file extension to filter by (e.g. '.kt', '.md')")
+                }
+            },
+            required = listOf("project_path"),
+        ),
+    ) { request ->
+        val projectPath = request.arguments?.get("project_path")?.jsonPrimitive?.content
+            ?: return@addTool CallToolResult(
+                content = listOf(TextContent("'project_path' is required."))
+            )
+        val fileExtension = request.arguments?.get("file_extension")?.jsonPrimitive?.contentOrNull
+
+        val projectDir = File(projectPath)
+        if (!projectDir.exists() || !projectDir.isDirectory) {
+            return@addTool CallToolResult(
+                content = listOf(TextContent("Directory not found: $projectPath"))
+            )
+        }
+
+        try {
+            val files = projectDir.walkTopDown()
+                .filter { it.isFile }
+                .let { sequence ->
+                    if (fileExtension != null) {
+                        sequence.filter { it.extension.equals(fileExtension.trimStart('.'), ignoreCase = true) }
+                    } else {
+                        sequence
+                    }
+                }
+                .map { it.relativeTo(projectDir).toString() }
+                .sorted()
+                .toList()
+
+            val result = files.joinToString("\n")
+            CallToolResult(content = listOf(TextContent(result)))
+        } catch (e: Exception) {
+            return@addTool CallToolResult(
+                content = listOf(TextContent("Failed to list files: ${e.message}"))
+            )
+        }
+    }
+
+    server.addTool(
+        name = "create_project_file",
+        description = "Creates a new empty file inside the given project directory.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                putJsonObject("project_path") {
+                    put("type", "string")
+                    put("description", "Absolute path to the project root directory")
+                }
+                putJsonObject("file_path") {
+                    put("type", "string")
+                    put("description", "Relative path to the file inside the project (e.g. 'src/Main.kt' or 'README.md')")
+                }
+            },
+            required = listOf("project_path", "file_path"),
+        ),
+    ) { request ->
+        val projectPath = request.arguments?.get("project_path")?.jsonPrimitive?.content
+            ?: return@addTool CallToolResult(
+                content = listOf(TextContent("'project_path' is required."))
+            )
+        val filePath = request.arguments?.get("file_path")?.jsonPrimitive?.content
+            ?: return@addTool CallToolResult(
+                content = listOf(TextContent("'file_path' is required."))
+            )
+
+        val projectDir = File(projectPath).canonicalFile
+        val targetFile = File(projectDir, filePath).canonicalFile
+
+        // Защита от path traversal
+        if (!targetFile.absolutePath.startsWith(projectDir.absolutePath)) {
+            return@addTool CallToolResult(
+                content = listOf(TextContent("Access denied: file is outside the project directory."))
+            )
+        }
+
+        try {
+            // Создаем родительские директории если они не существуют
+            targetFile.parentFile?.mkdirs()
+            if (targetFile.createNewFile()) {
+                CallToolResult(content = listOf(TextContent("Successfully created file: $filePath")))
+            } else {
+                CallToolResult(content = listOf(TextContent("File already exists: $filePath")))
+            }
+        } catch (e: Exception) {
+            return@addTool CallToolResult(
+                content = listOf(TextContent("Failed to create file: ${e.message}"))
+            )
+        }
+    }
+
+    server.addTool(
+        name = "delete_project_file",
+        description = "Deletes a file inside the given project directory.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                putJsonObject("project_path") {
+                    put("type", "string")
+                    put("description", "Absolute path to the project root directory")
+                }
+                putJsonObject("file_path") {
+                    put("type", "string")
+                    put("description", "Relative path to the file inside the project (e.g. 'src/Main.kt' or 'README.md')")
+                }
+            },
+            required = listOf("project_path", "file_path"),
+        ),
+    ) { request ->
+        val projectPath = request.arguments?.get("project_path")?.jsonPrimitive?.content
+            ?: return@addTool CallToolResult(
+                content = listOf(TextContent("'project_path' is required."))
+            )
+        val filePath = request.arguments?.get("file_path")?.jsonPrimitive?.content
+            ?: return@addTool CallToolResult(
+                content = listOf(TextContent("'file_path' is required."))
+            )
+
+        val projectDir = File(projectPath).canonicalFile
+        val targetFile = File(projectDir, filePath).canonicalFile
+
+        // Защита от path traversal
+        if (!targetFile.absolutePath.startsWith(projectDir.absolutePath)) {
+            return@addTool CallToolResult(
+                content = listOf(TextContent("Access denied: file is outside the project directory."))
+            )
+        }
+
+        if (!targetFile.exists()) {
+            return@addTool CallToolResult(
+                content = listOf(TextContent("File not found: $filePath"))
+            )
+        }
+
+        try {
+            if (targetFile.delete()) {
+                CallToolResult(content = listOf(TextContent("Successfully deleted file: $filePath")))
+            } else {
+                CallToolResult(content = listOf(TextContent("Failed to delete file: $filePath")))
+            }
+        } catch (e: Exception) {
+            return@addTool CallToolResult(
+                content = listOf(TextContent("Failed to delete file: ${e.message}"))
+            )
+        }
+    }
+
 server.addTool(
         name = "get_git_diff",
         description = "Returns the git diff of the project for code review. " +
